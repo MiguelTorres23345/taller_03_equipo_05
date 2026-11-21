@@ -4,10 +4,12 @@
 # Descripcion:
 #   Modelos del taller para el precio: random forest (ranger) y XGBoost. Los
 #   hiperparametros se escogen para minimizar el MAE. Cada modelo se corre con
-#   dos validaciones cruzadas espaciales, ambas con un buffer de distancia_buffer
-#   metros que se excluye del entrenamiento alrededor de lo que se valida: una
-#   por localidades (un fold por localidad) y otra por bloques. Al final de cada
-#   modelo se predice el test y se exporta el archivo para Kaggle.
+#   dos validaciones cruzadas espaciales. Una deja una localidad por fold y
+#   excluye del entrenamiento lo que esta a menos de distancia_buffer metros de
+#   ella. La otra usa bloques pequenos sin buffer, repetidos con varias semillas,
+#   para que la distancia entre lo que se valida y lo que se entrena se parezca a
+#   la del test. Las coordenadas del anuncio entran como predictores. Al final de
+#   cada modelo se predice el test y se exporta el archivo para Kaggle.
 # Input:
 #   train_planas.csv y test_planas.csv (salida de 02_variables_planas.R) y el
 #   shapefile de localidades de Bogota (IDECA, Loca.shp).
@@ -38,15 +40,24 @@ archivo_localidades <- file.path(dir_datos, "localidades", "Loca.shp")
 # Metros que se excluyen alrededor de la localidad que se valida
 distancia_buffer <- 300
 
-# Lado (metros) de los bloques de la validacion espacial por bloques
-tamano_bloque <- 2000
+# Lado (metros) de los bloques de la validacion espacial por bloques. Se escoge
+# para que la distancia de lo que se valida al entrenamiento se parezca a la del
+# test (mediana cerca de 96 m, percentil 90 cerca de 275 m). No lleva buffer
+tamano_bloque <- 400
+
+# Cantidad de veces que se reparten los bloques entre los folds (semillas distintas)
+n_semillas <- 3
+
+# Texto que se agrega al nombre de los archivos de salida, para no sobrescribir
+# los de corridas anteriores
+sufijo <- "_coord"
 
 n_arboles <- 500
 vars_modelo <- c("surface_covered", "bedrooms", "bathrooms", "property_type",
                  "month", "year", "estrato", "valor_ref", "uso", "incidentes",
                  "dist_est5", "dist_est6", "prop_comercio", "dist_parque",
                  "dist_restaurante", "dist_universidad", "dist_financiero",
-                 "dist_avenida", "dist_tm")
+                 "dist_avenida", "dist_tm", "coord_x", "coord_y")
 
 dir.create(dir_submit, recursive = TRUE, showWarnings = FALSE)
 
@@ -100,12 +111,25 @@ fun_puntos <- function(.db) {
     st_transform(3116)
 }
 
+# Distancia en metros de cada punto de .obj al punto mas cercano de .ref
+fun_dist_cercana <- function(.obj, .ref) {
+  cercano <- st_nearest_feature(.obj, .ref)
+  as.numeric(st_distance(.obj, .ref[cercano, ], by_element = TRUE))
+}
+
 
 # ------------------------------------------------------------------------------
 # (4) Localidad de cada anuncio y validacion espacial con buffer
 # ------------------------------------------------------------------------------
 
 puntos_train <- fun_puntos(train_planas)
+puntos_test <- fun_puntos(test_planas)
+
+# Coordenadas en metros (EPSG 3116) como predictores
+train_planas$coord_x <- st_coordinates(puntos_train)[, 1]
+train_planas$coord_y <- st_coordinates(puntos_train)[, 2]
+test_planas$coord_x <- st_coordinates(puntos_test)[, 1]
+test_planas$coord_y <- st_coordinates(puntos_test)[, 2]
 
 # Localidad mas cercana a cada anuncio (los puntos con coordenadas en la calle
 # quedan asignados igual)
@@ -152,10 +176,13 @@ stopifnot(nrow(db_train) == nrow(puntos_train),
 # (6) Random forest
 # ------------------------------------------------------------------------------
 
+# Los mejores modelos anteriores quedaron en el borde de la grilla (mtry 8 y
+# nodo 40), asi que se extiende hacia ese lado. Los nodos grandes tambien usan
+# menos memoria
 rf_grid <- expand.grid(
-  mtry = c(3, 5, 8),
+  mtry = c(5, 8, 11, 14),
   splitrule = "variance",
-  min.node.size = c(20, 40)
+  min.node.size = c(40, 80)
 )
 
 set.seed(2026)
@@ -209,14 +236,14 @@ predict_rf <- test_planas |>
   select(property_id, price)
 
 name_rf <- paste0("RF_mtry_", rf_mae$bestTune$mtry,
-                  "_nodo_", rf_mae$bestTune$min.node.size, ".csv")
+                  "_nodo_", rf_mae$bestTune$min.node.size, sufijo, ".csv")
 write_csv(predict_rf, file.path(dir_submit, name_rf))
 
 # Tabla de resultados para comparar con los demas modelos
 resultados <- data.frame(modelo = "RF", archivo = name_rf, mtry = rf_mae$bestTune$mtry,
                          min.node.size = rf_mae$bestTune$min.node.size,
                          MAE_cv_millones = mae_rf)
-write_csv(resultados, file.path(dir_submit, "resultados_rf.csv"))
+write_csv(resultados, file.path(dir_submit, paste0("resultados_rf", sufijo, ".csv")))
 print(resultados)
 
 
@@ -237,13 +264,15 @@ x_train <- fun_matriz(db_train)
 x_test <- fun_matriz(db_test)
 stopifnot(identical(colnames(x_train), colnames(x_test)))
 
+# El mejor modelo anterior tuvo eta 0.03, profundidad 6 y 300 rondas, los valores
+# extremos de la grilla. Se prueban eta menores, mas profundidad y mas rondas
 xgb_grid <- expand.grid(
-  nrounds = c(300, 600),
-  max_depth = c(3, 6),
-  eta = c(0.03, 0.1),
+  nrounds = c(300, 600, 1000),
+  max_depth = c(6, 8),
+  eta = c(0.01, 0.03),
   gamma = 0,
   colsample_bytree = 0.8,
-  min_child_weight = c(5, 20),
+  min_child_weight = c(20, 50),
   subsample = 0.8
 )
 
@@ -298,7 +327,7 @@ predict_xgb <- test_planas |>
 
 name_xgb <- paste0("XGB_nrounds_", xgb_mae$bestTune$nrounds,
                    "_depth_", xgb_mae$bestTune$max_depth,
-                   "_eta_", xgb_mae$bestTune$eta, ".csv")
+                   "_eta_", xgb_mae$bestTune$eta, sufijo, ".csv")
 write_csv(predict_xgb, file.path(dir_submit, name_xgb))
 
 # Tabla de resultados para comparar con los demas modelos
@@ -308,31 +337,49 @@ resultados_xgb <- data.frame(modelo = "XGB", archivo = name_xgb,
                              eta = xgb_mae$bestTune$eta,
                              min_child_weight = xgb_mae$bestTune$min_child_weight,
                              MAE_cv_millones = mae_xgb)
-write_csv(resultados_xgb, file.path(dir_submit, "resultados_xgb.csv"))
+write_csv(resultados_xgb, file.path(dir_submit, paste0("resultados_xgb", sufijo, ".csv")))
 print(resultados_xgb)
 
 
 # ------------------------------------------------------------------------------
-# (12) Validacion espacial por bloques
+# (12) Validacion espacial por bloques sin buffer
 # ------------------------------------------------------------------------------
 
-# Bloques cuadrados de tamano_bloque metros asignados al azar a 5 folds. El
-# entrenamiento excluye ademas lo que este a menos de distancia_buffer metros de
-# los anuncios que se validan. puntos_train tiene el mismo orden de filas que db_train
-set.seed(2026)
-folds_bloques_buffer <- spatial_block_cv(
-  puntos_train, v = 5, method = "random", cellsize = tamano_bloque,
-  radius = NULL, buffer = distancia_buffer
-)
-folds_bloques_buffer
+# Bloques cuadrados de tamano_bloque metros asignados al azar a 5 folds, sin
+# buffer. El reparto se repite n_semillas veces con semillas distintas y todos los
+# folds se juntan en una sola lista para caret. puntos_train tiene el mismo orden
+# de filas que db_train
+indices_bloques <- list()
+indices_fuera_bloques <- list()
+for (s in seq_len(n_semillas)) {
+  set.seed(2025 + s)
+  folds_s <- spatial_block_cv(
+    puntos_train, v = 5, method = "random", cellsize = tamano_bloque,
+    radius = NULL, buffer = NULL
+  )
+  folds_s_caret <- rsample2caret(folds_s)
+  names(folds_s_caret$index) <- paste0("S", s, "_", names(folds_s_caret$index))
+  names(folds_s_caret$indexOut) <- names(folds_s_caret$index)
+  indices_bloques <- c(indices_bloques, folds_s_caret$index)
+  indices_fuera_bloques <- c(indices_fuera_bloques, folds_s_caret$indexOut)
+}
+length(indices_bloques)
 
-# Los folds se pasan a caret
-folds_bloques_caret <- rsample2caret(folds_bloques_buffer)
+# Revision del tamano del bloque. Distancia (m) de cada anuncio que se valida al
+# anuncio de entrenamiento mas cercano, comparada con la del test al train
+prob <- c(0.10, 0.25, 0.50, 0.75, 0.90)
+dist_test_train <- fun_dist_cercana(puntos_test, puntos_train)
+dist_validacion <- unlist(lapply(1:5, function(k) {
+  fun_dist_cercana(puntos_train[indices_fuera_bloques[[k]], ],
+                   puntos_train[indices_bloques[[k]], ])
+}))
+print(rbind(test = quantile(dist_test_train, prob),
+            validacion_bloques = quantile(dist_validacion, prob)))
 
 ctrl_bloques <- trainControl(
   method = "cv",
-  index = folds_bloques_caret$index,
-  indexOut = folds_bloques_caret$indexOut,
+  index = indices_bloques,
+  indexOut = indices_fuera_bloques,
   summaryFunction = fun_mae,
   savePredictions = "final"
 )
@@ -384,7 +431,7 @@ predict_rf_bloques <- test_planas |>
   select(property_id, price)
 
 name_rf_bloques <- paste0("RF_bloques_mtry_", rf_bloques$bestTune$mtry,
-                          "_nodo_", rf_bloques$bestTune$min.node.size, ".csv")
+                          "_nodo_", rf_bloques$bestTune$min.node.size, sufijo, ".csv")
 write_csv(predict_rf_bloques, file.path(dir_submit, name_rf_bloques))
 
 # Tabla de resultados para comparar con los demas modelos
@@ -392,7 +439,7 @@ resultados_rf_bloques <- data.frame(modelo = "RF_bloques", archivo = name_rf_blo
                                     mtry = rf_bloques$bestTune$mtry,
                                     min.node.size = rf_bloques$bestTune$min.node.size,
                                     MAE_cv_millones = mae_rf_bloques)
-write_csv(resultados_rf_bloques, file.path(dir_submit, "resultados_rf_bloques.csv"))
+write_csv(resultados_rf_bloques, file.path(dir_submit, paste0("resultados_rf_bloques", sufijo, ".csv")))
 print(resultados_rf_bloques)
 
 
@@ -442,7 +489,7 @@ predict_xgb_bloques <- test_planas |>
 
 name_xgb_bloques <- paste0("XGB_bloques_nrounds_", xgb_bloques$bestTune$nrounds,
                            "_depth_", xgb_bloques$bestTune$max_depth,
-                           "_eta_", xgb_bloques$bestTune$eta, ".csv")
+                           "_eta_", xgb_bloques$bestTune$eta, sufijo, ".csv")
 write_csv(predict_xgb_bloques, file.path(dir_submit, name_xgb_bloques))
 
 # Tabla de resultados para comparar con los demas modelos
@@ -452,5 +499,5 @@ resultados_xgb_bloques <- data.frame(modelo = "XGB_bloques", archivo = name_xgb_
                                      eta = xgb_bloques$bestTune$eta,
                                      min_child_weight = xgb_bloques$bestTune$min_child_weight,
                                      MAE_cv_millones = mae_xgb_bloques)
-write_csv(resultados_xgb_bloques, file.path(dir_submit, "resultados_xgb_bloques.csv"))
+write_csv(resultados_xgb_bloques, file.path(dir_submit, paste0("resultados_xgb_bloques", sufijo, ".csv")))
 print(resultados_xgb_bloques)
