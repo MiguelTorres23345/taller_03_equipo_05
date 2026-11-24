@@ -49,6 +49,15 @@ n_semillas <- 3
 sufijo <- "_txt"
 
 n_arboles <- 500
+
+# Nucleos para correr los folds de caret en paralelo. Se limita a 4 porque cada
+# nucleo guarda en memoria un bosque o un modelo a la vez
+n_nucleos <- max(1, min(4, parallel::detectCores() - 1))
+
+# Largo de cada vector de semillas de caret, al menos el tamano de la grilla mas
+# grande (se verifica en la seccion 9)
+n_modelos_max <- 50
+
 vars_modelo <- c("surface_covered", "bedrooms", "bathrooms", "property_type",
                  "month", "year", "estrato", "valor_ref", "uso", "incidentes",
                  "dist_est5", "dist_est6", "prop_comercio", "dist_parque",
@@ -109,6 +118,15 @@ fun_preparar <- function(.db, .ref) {
   .db
 }
 
+# Semillas de caret, una por fold y modelo. Con ellas el resultado de cada fold
+# no depende de si los folds corren en paralelo o uno tras otro, y se repite igual
+# en cada corrida
+fun_semillas <- function(.n_folds, .n_modelos, .semilla = 2026) {
+  set.seed(.semilla)
+  c(lapply(seq_len(.n_folds), function(i) sample.int(1e6, .n_modelos)),
+    list(sample.int(1e6, 1)))
+}
+
 # Metrica para caret: MAE de cada fold
 fun_mae <- function(data, lev = NULL, model = NULL) {
   c(MAE = mean(abs(data$obs - data$pred)))
@@ -163,8 +181,15 @@ ctrl_mae <- trainControl(
   index = folds_caret$index,
   indexOut = folds_caret$indexOut,
   summaryFunction = fun_mae,
-  savePredictions = "final"
+  savePredictions = "final",
+  seeds = fun_semillas(length(folds_caret$index), n_modelos_max),
+  allowParallel = TRUE
 )
+
+# Los folds de caret se reparten entre n_nucleos procesos. Cada modelo usa un solo
+# hilo (num.threads y nthread en train) para no saturar el computador
+cl <- makeCluster(n_nucleos)
+registerDoParallel(cl)
 
 
 # ------------------------------------------------------------------------------
@@ -205,7 +230,8 @@ rf_mae <- train(
   trControl = ctrl_mae,
   tuneGrid = rf_grid,
   num.trees = n_arboles,
-  importance = "impurity"
+  importance = "impurity",
+  num.threads = 1
 )
 
 rf_mae
@@ -285,6 +311,7 @@ xgb_grid <- expand.grid(
   min_child_weight = c(20, 50),
   subsample = 0.8
 )
+stopifnot(max(nrow(rf_grid), nrow(xgb_grid)) <= n_modelos_max)
 
 set.seed(2026)
 xgb_mae <- train(
@@ -295,7 +322,8 @@ xgb_mae <- train(
   maximize = FALSE,
   trControl = ctrl_mae,
   tuneGrid = xgb_grid,
-  verbosity = 0
+  verbosity = 0,
+  nthread = 1
 )
 
 xgb_mae
@@ -391,7 +419,9 @@ ctrl_bloques <- trainControl(
   index = indices_bloques,
   indexOut = indices_fuera_bloques,
   summaryFunction = fun_mae,
-  savePredictions = "final"
+  savePredictions = "final",
+  seeds = fun_semillas(length(indices_bloques), n_modelos_max),
+  allowParallel = TRUE
 )
 
 
@@ -409,7 +439,8 @@ rf_bloques <- train(
   trControl = ctrl_bloques,
   tuneGrid = rf_grid,
   num.trees = n_arboles,
-  importance = "impurity"
+  importance = "impurity",
+  num.threads = 1
 )
 
 rf_bloques
@@ -466,7 +497,8 @@ xgb_bloques <- train(
   maximize = FALSE,
   trControl = ctrl_bloques,
   tuneGrid = xgb_grid,
-  verbosity = 0
+  verbosity = 0,
+  nthread = 1
 )
 
 xgb_bloques
@@ -511,3 +543,6 @@ resultados_xgb_bloques <- data.frame(modelo = "XGB_bloques", archivo = name_xgb_
                                      MAE_cv_millones = mae_xgb_bloques)
 write_csv(resultados_xgb_bloques, file.path(dir_submit, paste0("resultados_xgb_bloques", sufijo, ".csv")))
 print(resultados_xgb_bloques)
+
+# Cerrar los procesos en paralelo
+stopCluster(cl)
