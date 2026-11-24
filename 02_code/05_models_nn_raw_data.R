@@ -375,3 +375,4 @@ ejecutar_experimentos_nn <- function(experimentos) {
 if (!identical(getOption("taller3.modo_nn"), "espacial")) {
   ejecutar_experimentos_nn(list(experimento_aleatorio_nn()))
 }
+
