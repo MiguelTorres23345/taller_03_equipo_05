@@ -34,7 +34,7 @@ p_load(
   writexl,       # Exportacion de tablas descriptivas a Excel.
   Matrix,        # Matrices dispersas para la ecuacion de ingreso.
   tidytext,      # Tokenizacion y TF-IDF de titulos y descripciones.
-
+  
   # (2.2) Entrenamiento y modelos
   stats,         # lm() y glm(): modelo lineal, logit y probit (incluido en R).
   lava,          # Dependencia indirecta de caret que falta en el entorno actual.
@@ -51,23 +51,26 @@ p_load(
   xgboost,       # Extreme Gradient Boosting (XGBoost).
   lightgbm,      # Light Gradient Boosting Machine (LightGBM).
   nnet,          # Redes neuronales de una capa oculta para regresion.
-
+  rsample,       # Remuestreo y folds; base de spatialsample.
+  spatialsample, # Validacion cruzada espacial (bloques y localidades).
+  
   # (2.3) Evaluacion
   pROC,          # Curvas ROC, AUC y evaluacion de umbrales.
   MLmetrics,     # Metricas de clasificacion; dependencia de prSummary de caret.
   Metrics,       # Metricas de regresion y clasificacion.
-
+  
   # (2.4) Organizacion y replicabilidad
   rstudioapi,    # Acceso al proyecto y al editor cuando se usa RStudio.
   conflicted,    # Resuelve funciones homonimas entre paquetes.
   docstring,     # Consulta de documentacion escrita dentro de funciones.
   renv,          # Permite fijar/restaurar versiones cuando se valide el entorno.
-
+  
   # (2.5) Recoleccion web y datos espaciales
   httr2,         # Descargas y consultas HTTP a APIs de datos abiertos.
   rvest,         # Extraccion de tablas y campos de paginas HTML.
   jsonlite,      # Lectura y conversion de respuestas y archivos JSON.
   sf,            # Capas de OSM y del Distrito, cruces y distancias.
+  osmextract,    # Descarga y lectura del extracto de OpenStreetMap de Bogota.
   terra          # Procesamiento de imagenes satelitales y otros raster.
 )
 
@@ -79,3 +82,4 @@ p_load(
 conflict_prefer("select", "dplyr")
 conflict_prefer("filter", "dplyr")
 conflict_prefer("lag", "dplyr")
+conflict_prefer("slice", "dplyr")  # xgboost y lightgbm tambien tienen slice()

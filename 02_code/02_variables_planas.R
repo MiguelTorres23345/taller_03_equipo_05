@@ -17,35 +17,29 @@
 #   shapefile Valor_Ref_M_2020 de Catastro Distrital y el shapefile
 #   GUsoMZ2020 (uso predominante por manzana), IRSCAT (incidentes
 #   reportados por sector catastral, IDECA) y el shapefile de estaciones
-#   troncales de TransMilenio. El extracto de OpenStreetMap se descarga con
-#   osmextract la primera vez y se guarda en la carpeta osm.
+#   troncales de TransMilenio, todos en 01_data. El extracto de
+#   OpenStreetMap se descarga con osmextract la primera vez y se guarda en
+#   01_data/osm. Se corre desde main.R, que carga los paquetes y
+#   define las rutas.
 # Output:
-#   train_planas y test_planas (CSV en la carpeta clean) con las columnas
+#   train_planas y test_planas (CSV en 01_data/clean) con las columnas
 #   estrato, valor_ref, uso (factor), incidentes, indice_seg, dist_est5,
 #   dist_est6, prop_comercio, dist_parque, dist_restaurante, dist_universidad,
-#   dist_financiero, dist_avenida y dist_tm, y los mapas en la carpeta mapas.
+#   dist_financiero, dist_avenida y dist_tm, y los mapas en 03_outputs/mapas.
 # ------------------------------------------------------------------------------
 
 
 # ------------------------------------------------------------------------------
-# (1) Paquetes y rutas
+# (1) Rutas y parametros
 # ------------------------------------------------------------------------------
 
-library(dplyr)
-library(readr)
-library(sf)
-library(ggplot2)
-library(osmextract)
-
-dir_datos <- "C:/Users/aeste/OneDrive/Documentos/10 Semestre/Big Data ML/Taller 3"
-dir_clean <- file.path(dir_datos, "clean")
-dir_mapas <- file.path(dir_datos, "mapas")
-archivo_manzanas <- file.path(dir_datos, "estratificacion", "ManzanaEstratificacion.shp")
-archivo_valor <- file.path(dir_datos, "valor_referencia", "Valor_Ref_M_2020.shp")
-archivo_uso <- file.path(dir_datos, "uso_predominante", "GUsoMZ2020.shp")
-archivo_seg <- file.path(dir_datos, "seguridad", "IRSCAT.shp")
-archivo_tm <- file.path(dir_datos, "transmilenio", "Estación_troncal.shp")
-dir_osm <- file.path(dir_datos, "osm")
+# dir_clean y dir_mapas vienen de main.R. Las capas externas estan en dir_externos
+archivo_manzanas <- file.path(dir_externos, "estratificacion", "ManzanaEstratificacion.shp")
+archivo_valor <- file.path(dir_externos, "valor_referencia", "Valor_Ref_M_2020.shp")
+archivo_uso <- file.path(dir_externos, "uso_predominante", "GUsoMZ2020.shp")
+archivo_seg <- file.path(dir_externos, "seguridad", "IRSCAT.shp")
+archivo_tm <- file.path(dir_externos, "transmilenio", "Estación_troncal.shp")
+dir_osm <- file.path(dir_externos, "osm")
 
 # Distancia maxima (metros) para asignar la manzana mas cercana a un anuncio
 dist_manzana <- 50

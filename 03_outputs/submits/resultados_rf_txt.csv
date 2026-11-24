@@ -1,0 +1,2 @@
+modelo,archivo,mtry,min.node.size,MAE_cv_millones
+RF,RF_mtry_8_nodo_80_txt.csv,8,80,132.33578324844413

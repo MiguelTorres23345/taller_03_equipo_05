@@ -9,9 +9,10 @@
 #   El titulo y la descripcion no se modifican: el texto se limpia solo en una
 #   copia temporal para buscar los patrones.
 # Input:
-#   train.csv y test.csv en la carpeta Taller 3.
+#   train.csv y test.csv en 01_data/01_raw (archivo_train y archivo_test de
+#   main.R). Se corre desde main.R, que carga los paquetes y define las rutas.
 # Output:
-#   train_clean y test_clean (objetos y archivos CSV en la carpeta clean) con
+#   train_clean y test_clean (objetos y archivos CSV en 01_data/clean) con
 #   surface_covered y bathrooms sin NA. Cada valor completado queda marcado en
 #   surface_source y bathrooms_source (base, texto o relleno), y area_text y
 #   bathrooms_text conservan lo encontrado en el texto.
@@ -19,14 +20,10 @@
 
 
 # ------------------------------------------------------------------------------
-# (1) Paquetes y rutas
+# (1) Parametros
 # ------------------------------------------------------------------------------
 
-library(dplyr)
-library(readr)
-
-dir_datos <- "C:/Users/aeste/OneDrive/Documentos/10 Semestre/Big Data ML/Taller 3"
-dir_clean <- file.path(dir_datos, "clean")
+# Las rutas (archivo_train, archivo_test, dir_clean) vienen de main.R
 
 # Tamanio minimo de un grupo para usar su moda o mediana en el relleno
 n_minimo <- 10
@@ -36,8 +33,8 @@ n_minimo <- 10
 # (2) Importar las bases originales
 # ------------------------------------------------------------------------------
 
-db_train <- read_csv(file.path(dir_datos, "train.csv"), show_col_types = FALSE)
-db_test <- read_csv(file.path(dir_datos, "test.csv"), show_col_types = FALSE)
+db_train <- read_csv(archivo_train, show_col_types = FALSE)
+db_test <- read_csv(archivo_test, show_col_types = FALSE)
 
 
 # ------------------------------------------------------------------------------
