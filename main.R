@@ -4,7 +4,7 @@
 # Descripcion: Ejecutar un bloque o reproducir todos los bloques en orden.
 # Input: CSV originales, capas externas y predictores de texto del equipo.
 # Output: Bases en 01_data/02_clean/ y resultados de cada bloque en 03_outputs/.
-# Uso: Rscript main.R [todo|arboles|nn|nn_embeddings|cleaning|modelos_limpios|regresion_basica|regresion_log|xgboost_text_svd]
+# Uso: Rscript main.R [todo|arboles|arboles_corregido|nn|nn_embeddings|cleaning|modelos_limpios|regresion_basica|regresion_log|xgboost_text_svd]
 #      El segundo argumento cambia el directorio de bases y el tercero el de salidas.
 #      Sin argumentos, ejecutar solo el flujo del XGBoost con TF-IDF/SVD.
 # ------------------------------------------------------------------------------
@@ -48,6 +48,7 @@ stopifnot("No se encuentra train.csv, abrir el proyecto taller_03_equipo_05.Rpro
 ejecutar <- function(bloque, seleccion = NULL) {
   script <- switch(bloque,
     arboles = "03_models_raw_data.R",
+    arboles_corregido = "03_models_raw_data.R",
     nn = "08_models_nn_raw_data_base_r.R",
     nn_embeddings = "08_models_nn_raw_data_base_r.R",
     cleaning = "01_cleaning.R",
@@ -96,6 +97,7 @@ if (tarea == "todo") {
   ejecutar("arboles")
   ejecutar("nn")
   seleccion <- ejecutar("modelos_limpios")
+  ejecutar("arboles_corregido")
   ejecutar("regresion_basica")
   ejecutar("xgboost_text_svd", seleccion)
 } else {

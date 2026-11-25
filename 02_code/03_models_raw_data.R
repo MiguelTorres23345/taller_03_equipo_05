@@ -5,11 +5,14 @@
 #   Comparar y ajustar Random Forest, XGBoost y LightGBM sobre los datos crudos.
 # Input:
 #   Rutas de main.R a train.csv, test.csv, submission_template.csv
-#   y al directorio dir_modelos_raw.
-#   Paquetes cargados por 00_setup.R.
+#   y al directorio dir_modelos_raw. Paquetes cargados por 00_setup.R.
+#   arboles_corregido usa los ID y coordenadas de train_clean.rds y los
+#   hiperparametros ganadores del resumen.xlsx generado por arboles.
 # Output:
 #   Fold y rankings en la sesion. En 03_outputs/01_models_raw_data/ se exportan
 #   resumen.xlsx, los tres modelos ganadores y sus CSV en formato Kaggle.
+#   arboles_corregido agrega estadisticas espaciales, una fila del bosque
+#   imputado y modelos y CSV con la etiqueta _corregido en las mismas carpetas.
 # ------------------------------------------------------------------------------
 
 # ------------------------------------------------------------------------------
@@ -18,6 +21,7 @@
 
 semilla <- 2026L
 n_folds <- 5L
+lado_bloque_m <- 400L
 hilos <- 4L
 cuantil <- 1 / 3
 
@@ -71,8 +75,8 @@ carpetas <- c(
 # (2) Leer los datos crudos y definir los folds
 # ------------------------------------------------------------------------------
 
-train <- read_csv(archivo_train, show_col_types = FALSE)
 tipo_id <- cols(property_id = col_character())
+train <- read_csv(archivo_train, col_types = tipo_id, show_col_types = FALSE)
 test <- read_csv(archivo_test, col_types = tipo_id, show_col_types = FALSE)
 plantilla <- read_csv(archivo_plantilla, col_types = tipo_id, col_select = property_id,
                        show_col_types = FALSE)
@@ -95,10 +99,6 @@ orden_test <- match(plantilla$property_id, test$property_id)
 stopifnot(!anyNA(y), !anyNA(test$property_id), !anyNA(plantilla$property_id),
           !anyDuplicated(test$property_id), !anyDuplicated(plantilla$property_id),
           setequal(test$property_id, plantilla$property_id), !anyNA(orden_test))
-
-set.seed(semilla)
-fold <- sample(rep(seq_len(n_folds), length.out = nrow(train)))
-indices_validacion <- split(seq_len(nrow(train)), fold)
 
 # ------------------------------------------------------------------------------
 # (3) Ajustes, predicciones y perdida
@@ -172,88 +172,233 @@ medir <- function(error_cop) {
 # (4) Validar, seleccionar y exportar el ganador de cada familia
 # ------------------------------------------------------------------------------
 
-hojas <- list(resumen = NULL)
-ganadores <- list()
-total_ajustes <- n_folds * sum(vapply(grillas, nrow, integer(1)))
-avance <- 0L
-
-for (familia in names(grillas)) {
-  grilla <- grillas[[familia]]
-  resultados <- vector("list", nrow(grilla))
-
-  for (i in seq_len(nrow(grilla))) {
-    parametros <- as.list(grilla[i, , drop = FALSE])
-    pred_cv <- numeric(nrow(train))
-    inicio <- Sys.time()
-
-    for (k in seq_len(n_folds)) {
-      validacion <- indices_validacion[[k]]
-      modelo <- ajustar(familia, x_train[-validacion, ], y[-validacion], parametros)
-      pred_cv[validacion] <- predecir(familia, modelo, x_train[validacion, ])
-      avance <- avance + 1L
-      message(sprintf(
-        "[%d/%d | %.1f%%] %s | combinacion %d/%d | fold %d/%d",
-        avance, total_ajustes, 100 * avance / total_ajustes,
-        familia, i, nrow(grilla), k, n_folds
-      ))
-    }
-
-    stopifnot(all(is.finite(pred_cv)))
-    # Cada aviso aporta un solo error fuera de su fold de entrenamiento.
-    metricas <- medir((pred_cv - y) * 1e6)
-    segundos <- as.numeric(difftime(Sys.time(), inicio, units = "secs"))
-    resultados[[i]] <- cbind(grilla[i, , drop = FALSE], metricas, segundos_cv = segundos)
-  }
-
-  ranking <- bind_rows(resultados)
-  ranking <- ranking[order(ranking$perdida_asim_cop, ranking$mae_cop), ]
-  ranking <- cbind(puesto = seq_len(nrow(ranking)), ranking)
-  mejor <- ranking[1, , drop = FALSE]
-  parametros <- as.list(mejor[names(grilla)])
-
-  # El nombre utiliza los valores de los hiperparametros principales del ganador.
-  iterados <- parametros_nombre[[familia]]
-  valores <- vapply(parametros[iterados], format, character(1),
+sufijo_modelo <- function(familia, parametros) {
+  claves <- parametros_nombre[[familia]]
+  valores <- vapply(parametros[claves], format, character(1),
                     trim = TRUE, scientific = FALSE, decimal.mark = ".")
-  pares <- paste(iterados, valores, sep = "_", recycle0 = TRUE)
-  sufijo <- paste(pares, collapse = "_")
-  etiqueta <- paste0(familia, "_raw_data")
-  nombre <- paste(c(etiqueta, pares), collapse = "_")
-  salida <- file.path(dir_modelos_raw, carpetas[[familia]])
-  dir.create(salida, recursive = TRUE, showWarnings = FALSE)
+  paste(paste(claves, valores, sep = "_"), collapse = "_")
+}
 
-  modelo <- ajustar(familia, x_train, y, parametros)
-  pred_test <- predecir(familia, modelo, x_test)
+exportar_modelo <- function(familia, parametros, nombre, datos_ajuste, precios, datos_test,
+                            medianas = NULL) {
+  ruta <- file.path(dir_modelos_raw, carpetas[[familia]], nombre)
+  modelo <- ajustar(familia, datos_ajuste, precios, parametros)
+  pred_test <- predecir(familia, modelo, datos_test)
   stopifnot(length(pred_test) == nrow(test), all(is.finite(pred_test)))
-
   switch(
     familia,
-    random_forest = saveRDS(modelo, file.path(salida, paste0(nombre, ".rds"))),
-    xgboost = xgb.save(modelo, file.path(salida, paste0(nombre, ".ubj"))),
-    lightgbm = lgb.save(modelo, file.path(salida, paste0(nombre, ".txt")))
+    random_forest = saveRDS(modelo, paste0(ruta, ".rds")),
+    xgboost = xgb.save(modelo, paste0(ruta, ".ubj")),
+    lightgbm = lgb.save(modelo, paste0(ruta, ".txt"))
   )
-  predicciones <- data.frame(property_id = plantilla$property_id, price = pred_test[orden_test] * 1e6)
-  write_csv(predicciones, file.path(salida, paste0(nombre, ".csv")))
+  if (!is.null(medianas)) {
+    saveRDS(list(medianas = medianas, cuantil = cuantil, escala_precio = 1e6),
+            paste0(ruta, "_entrada.rds"))
+  }
+  write_csv(data.frame(property_id = plantilla$property_id, price = pred_test[orden_test] * 1e6),
+            paste0(ruta, ".csv"))
+}
 
-  ganadores[[familia]] <- cbind(
-    modelo = familia, bloque = "raw_data", k_folds = n_folds, semilla = semilla,
-    n_combinaciones = nrow(grilla), mejor[names(metricas)], hiperparametros = sufijo
-  )
-  hojas[[etiqueta]] <- head(ranking, 15L)
-  message(sprintf("Ganador %s | %s | perdida COP %.0f", familia, sufijo,
-                  mejor$perdida_asim_cop))
+estimar_crudos <- function() {
+  set.seed(semilla)
+  fold <- sample(rep(seq_len(n_folds), length.out = nrow(train)))
+  indices_validacion <- split(seq_len(nrow(train)), fold)
+
+  hojas <- list(resumen = NULL)
+  ganadores <- list()
+  total_ajustes <- n_folds * sum(vapply(grillas, nrow, integer(1)))
+  avance <- 0L
+
+  for (familia in names(grillas)) {
+    grilla <- grillas[[familia]]
+    resultados <- vector("list", nrow(grilla))
+
+    for (i in seq_len(nrow(grilla))) {
+      parametros <- as.list(grilla[i, , drop = FALSE])
+      pred_cv <- numeric(nrow(train))
+      inicio <- Sys.time()
+
+      for (k in seq_len(n_folds)) {
+        validacion <- indices_validacion[[k]]
+        modelo <- ajustar(familia, x_train[-validacion, ], y[-validacion], parametros)
+        pred_cv[validacion] <- predecir(familia, modelo, x_train[validacion, ])
+        avance <- avance + 1L
+        message(sprintf(
+          "[%d/%d | %.1f%%] %s | combinacion %d/%d | fold %d/%d",
+          avance, total_ajustes, 100 * avance / total_ajustes,
+          familia, i, nrow(grilla), k, n_folds
+        ))
+      }
+
+      stopifnot(all(is.finite(pred_cv)))
+      # Cada aviso aporta un solo error fuera de su fold de entrenamiento.
+      metricas <- medir((pred_cv - y) * 1e6)
+      segundos <- as.numeric(difftime(Sys.time(), inicio, units = "secs"))
+      resultados[[i]] <- cbind(grilla[i, , drop = FALSE], metricas, segundos_cv = segundos)
+    }
+
+    ranking <- bind_rows(resultados)
+    ranking <- ranking[order(ranking$perdida_asim_cop, ranking$mae_cop), ]
+    ranking <- cbind(puesto = seq_len(nrow(ranking)), ranking)
+    mejor <- ranking[1, , drop = FALSE]
+    parametros <- as.list(mejor[names(grilla)])
+
+    sufijo <- sufijo_modelo(familia, parametros)
+    etiqueta <- paste0(familia, "_raw_data")
+    nombre <- paste(etiqueta, sufijo, sep = "_")
+    dir.create(file.path(dir_modelos_raw, carpetas[[familia]]),
+               recursive = TRUE, showWarnings = FALSE)
+    exportar_modelo(familia, parametros, nombre, x_train, y, x_test)
+
+    ganadores[[familia]] <- cbind(
+      modelo = familia, bloque = "raw_data", k_folds = n_folds, semilla = semilla,
+      n_combinaciones = nrow(grilla), mejor[names(metricas)], hiperparametros = sufijo
+    )
+    hojas[[etiqueta]] <- head(ranking, 15L)
+    message(sprintf("Ganador %s | %s | perdida COP %.0f", familia, sufijo,
+                    mejor$perdida_asim_cop))
+  }
+
+  # Guardar el resumen y mostrar los tres ganadores.
+
+  resumen <- bind_rows(ganadores)
+  resumen <- resumen[order(resumen$perdida_asim_cop, resumen$mae_cop), ]
+  hojas[["resumen"]] <- resumen
+
+  # Mantener las cifras como numeros, con COP enteros para la visualizacion.
+  write.xlsx(hojas, file.path(dir_modelos_raw, "resumen.xlsx"), overwrite = TRUE)
+
+  print(resumen[c("modelo", "perdida_asim_cop", "mae_cop", "hiperparametros")],
+        row.names = FALSE)
 }
 
 # ------------------------------------------------------------------------------
-# (5) Guardar el resumen y mostrar los tres ganadores
+# (5) Reestimar los ganadores sin republicaciones y con bloques de 400 m
 # ------------------------------------------------------------------------------
 
-resumen <- bind_rows(ganadores)
-resumen <- resumen[order(resumen$perdida_asim_cop, resumen$mae_cop), ]
-hojas[["resumen"]] <- resumen
+rellenar_mediana <- function(datos, medianas) {
+  for (variable in names(medianas)) {
+    datos[[variable]][is.na(datos[[variable]])] <- medianas[[variable]]
+  }
+  datos
+}
 
-# Mantener las cifras como numeros, con COP enteros para la visualizacion.
-write.xlsx(hojas, file.path(dir_modelos_raw, "resumen.xlsx"), overwrite = TRUE)
+estimar_corregidos <- function() {
+  archivo_resumen <- file.path(dir_modelos_raw, "resumen.xlsx")
+  if (!file.exists(archivo_resumen) || !file.exists(archivo_train_clean)) {
+    stop("Se requieren el resumen de arboles y train_clean.rds de cleaning.",
+         call. = FALSE)
+  }
+  if (!all(dir.exists(file.path(dir_modelos_raw, carpetas)))) {
+    stop("Se requieren las carpetas de modelos generadas por arboles.", call. = FALSE)
+  }
+  libro <- loadWorkbook(archivo_resumen)
+  resumen_anterior <- read.xlsx(libro, "resumen")
+  corregido <- "random_forest_corregido"
+  resumen <- resumen_anterior[resumen_anterior$modelo != corregido, , drop = FALSE]
 
-print(resumen[c("modelo", "perdida_asim_cop", "mae_cop", "hiperparametros")],
-      row.names = FALSE)
+  # Reutilizar los identificadores y coordenadas del cleaning. Los predictores
+  # siguen saliendo de las filas originales, antes de las imputaciones del cleaning.
+  clean <- readRDS(archivo_train_clean)
+  filas <- which(train$property_id %in% clean$property_id)
+  orden <- match(train$property_id[filas], clean$property_id)
+  coords <- as.matrix(clean[orden, c("coord_x", "coord_y")])
+  stopifnot(nrow(coords) == nrow(clean), !anyDuplicated(orden), all(is.finite(coords)))
+  celdas <- floor(sweep(coords, 2L, apply(coords, 2L, min)) / lado_bloque_m)
+  cuadrante <- paste(celdas[, 1L], celdas[, 2L], sep = "_")
+  bloques <- sort(unique(cuadrante), method = "radix")
+  set.seed(semilla)
+  asignacion <- setNames(sample(rep(seq_len(n_folds), length.out = length(bloques))), bloques)
+  fold_espacial <- unname(asignacion[cuadrante])
+  stopifnot(length(unique(fold_espacial)) == n_folds)
+
+  datos <- x_train[filas, , drop = FALSE]
+  precios <- y[filas]
+  familias <- names(grillas)
+  variantes <- c(setNames(familias, familias), setNames("random_forest", corregido))
+  estadisticas <- vector("list", length(variantes))
+  for (i in seq_along(variantes)) {
+    variante <- names(variantes)[i]
+    familia <- unname(variantes[i])
+    imputar <- variante == corregido
+    ranking <- read.xlsx(libro, paste0(familia, "_raw_data"))
+    ganador <- ranking[ranking$puesto == 1L, names(grillas[[familia]]), drop = FALSE]
+    stopifnot(nrow(ganador) == 1L, all(is.finite(unlist(ganador))))
+    parametros <- as.list(ganador)
+    sufijo <- sufijo_modelo(familia, parametros)
+    etiqueta <- paste0(familia, "_raw_data_corregido")
+    if (familia == "random_forest" && !imputar) {
+      etiqueta <- paste0(etiqueta, "_sin_imputacion")
+    }
+    nombre <- paste(etiqueta, sufijo, sep = "_")
+    pred_cv <- numeric(nrow(datos))
+    segundos_fold <- numeric(n_folds)
+
+    for (k in seq_len(n_folds)) {
+      inicio_fold <- Sys.time()
+      validacion <- which(fold_espacial == k)
+      ajuste <- datos[-validacion, , drop = FALSE]
+      prueba <- datos[validacion, , drop = FALSE]
+      if (imputar) {
+        medianas <- vapply(ajuste, median, numeric(1), na.rm = TRUE)
+        stopifnot(all(is.finite(medianas)))
+        ajuste <- rellenar_mediana(ajuste, medianas)
+        prueba <- rellenar_mediana(prueba, medianas)
+      }
+      modelo <- ajustar(familia, ajuste, precios[-validacion], parametros)
+      pred_cv[validacion] <- predecir(familia, modelo, prueba)
+      segundos_fold[k] <- as.numeric(difftime(Sys.time(), inicio_fold, units = "secs"))
+      message(sprintf("[%d/%d] %s | fold espacial %d/%d",
+                      (i - 1L) * n_folds + k, length(variantes) * n_folds,
+                      variante, k, n_folds))
+    }
+
+    stopifnot(all(is.finite(pred_cv)))
+    error <- (pred_cv - precios) * 1e6
+    global <- medir(error)
+    por_fold <- lapply(split(error, fold_espacial), function(e) {
+      cbind(n_validacion = length(e), medir(e))
+    })
+    estadisticas[[i]] <- cbind(
+      modelo = variante, bloque_m = lado_bloque_m, semilla = semilla,
+      fold = c("global", names(por_fold)),
+      bind_rows(c(list(cbind(n_validacion = length(error), global)), por_fold)),
+      hiperparametros = sufijo,
+      archivo_prediccion = file.path(carpetas[[familia]], paste0(nombre, ".csv")),
+      segundos_cv = c(sum(segundos_fold), segundos_fold)
+    )
+
+    medianas <- NULL
+    datos_ajuste <- datos
+    datos_test <- x_test
+    if (imputar) {
+      medianas <- vapply(datos, median, numeric(1), na.rm = TRUE)
+      stopifnot(all(is.finite(medianas)))
+      datos_ajuste <- rellenar_mediana(datos, medianas)
+      datos_test <- rellenar_mediana(x_test, medianas)
+      resumen <- bind_rows(resumen, cbind(
+        modelo = corregido, bloque = "raw_data_espacial_imputado",
+        k_folds = n_folds, semilla = semilla, n_combinaciones = 1L,
+        global, hiperparametros = sufijo
+      ))
+    }
+    exportar_modelo(familia, parametros, nombre, datos_ajuste, precios, datos_test, medianas)
+  }
+
+  # Mantener las filas historicas y reemplazar la fila corregida al repetir el bloque.
+  writeData(libro, "resumen", resumen)
+  hoja <- "cv_espacial_corregido"
+  if (hoja %in% names(libro)) removeWorksheet(libro, hoja)
+  addWorksheet(libro, hoja)
+  estadisticas <- bind_rows(estadisticas)
+  writeData(libro, hoja, estadisticas)
+  saveWorkbook(libro, archivo_resumen, overwrite = TRUE)
+  print(estadisticas[estadisticas$fold == "global", c("modelo", "mae_cop", "hiperparametros")],
+        row.names = FALSE)
+}
+
+if (identical(get0("bloque"), "arboles_corregido")) {
+  estimar_corregidos()
+} else {
+  estimar_crudos()
+}

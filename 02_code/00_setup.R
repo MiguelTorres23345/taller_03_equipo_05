@@ -30,6 +30,7 @@ if (!require("pacman", quietly = TRUE)) {
 # sf y osmextract leen las capas.
 # sbert y digest identifican y generan los embeddings. reticulate ejecuta TF-IDF.
 paquetes <- switch(if (bloque == "regresion_log") "regresion_basica" else bloque,
+  arboles_corregido = ,
   arboles = c("readr", "dplyr", "openxlsx", "ranger", "xgboost", "lightgbm"),
   nn = c("readr", "dplyr", "openxlsx", "sbert", "digest"),
   nn_embeddings = c("readr", "dplyr", "sbert", "digest"),
