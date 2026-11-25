@@ -7,7 +7,7 @@
 # Uso: Rscript main.R [final|todo|arboles|arboles_corregido|nn|nn_embeddings|cleaning|modelos_limpios|
 #                     regresion_basica|regresion_log|xgboost_text_svd|
 #                     folds|texto_python|modelos_texto|xgboost|random_forest|
-#                     modelos_python|ablacion|figuras|prueba]
+#                     modelos_python|ablacion|figuras]
 #      Sin argumentos se ejecuta "final": el flujo que produce el modelo reportado
 #      (XGBoost y random forest con validacion espacial por bloques de 400 m y
 #      variables de texto), sus tablas y sus figuras. Orden de "final":
@@ -198,51 +198,7 @@ guardar_sesion <- function() {
   writeLines(capture.output(sessionInfo()), file.path("04_documentation", "sessionInfo_R.txt"))
 }
 
-# ------------------------------------------------------------------------------
-# (4) Prueba rapida: el mismo flujo con una muestra pequena de los datos
-# ------------------------------------------------------------------------------
-# Rscript main.R prueba [n]   (n anuncios de train, 2000 por defecto)
-# Copia una muestra de las bases a 03_outputs/prueba/ y corre alli folds, modelos,
-# ablacion y figuras, asi que no toca 01_data/ ni los resultados reales. La limpieza
-# (cleaning) no se prueba aqui porque no tiene modo muestra.
-
-preparar_prueba <- function(n) {
-  raiz <- file.path("03_outputs", "prueba")
-  unlink(raiz, recursive = TRUE)
-  dir.create(file.path(raiz, "01_data", "02_clean"), recursive = TRUE)
-  dir.create(file.path(raiz, "01_data", "02_text"), recursive = TRUE)
-  dir.create(file.path(raiz, "01_data", "01_raw", "fuentes_externas", "localidades"), recursive = TRUE)
-  set.seed(2026)
-  ids <- sample(read.csv(archivo_train_planas, colClasses = c(property_id = "character"))$property_id, n)
-  for (nombre in c("train_planas", "train_clean")) {
-    base <- read.csv(file.path("01_data", "02_clean", paste0(nombre, ".csv")),
-                     colClasses = c(property_id = "character"), check.names = FALSE)
-    write.csv(base[base$property_id %in% ids, ],
-              file.path(raiz, "01_data", "02_clean", paste0(nombre, ".csv")), row.names = FALSE)
-  }
-  file.copy(file.path("01_data", "02_clean", c("test_planas.csv", "test_clean.csv")),
-            file.path(raiz, "01_data", "02_clean"))
-  file.copy(list.files(file.path("01_data", "02_text"), pattern = "^text_.*[.]csv$", full.names = TRUE),
-            file.path(raiz, "01_data", "02_text"))
-  carpeta_loc <- file.path("01_data", "01_raw", "fuentes_externas", "localidades")
-  file.copy(list.files(carpeta_loc, full.names = TRUE),
-            file.path(raiz, "01_data", "01_raw", "fuentes_externas", "localidades"))
-  raiz
-}
-
-if (tarea == "prueba") {
-  n_prueba <- if (length(argumentos) >= 2L) as.integer(argumentos[2L]) else 2000L
-  root <- preparar_prueba(n_prueba)
-  message("PRUEBA con ", n_prueba, " anuncios de train; salidas en ", root)
-  ejecutar_final("folds")
-  ejecutar_final("modelos_texto")
-  if (correr_modelos_python) {
-    correr_python("12_models_python_rf_xgb.py", c("--sample", as.character(min(n_prueba, 600L))))
-  }
-  ejecutar_final("ablacion")
-  ejecutar_final("figuras")
-  message("PRUEBA terminada sin errores")
-} else if (tarea == "final") {
+if (tarea == "final") {
   if (!file.exists(archivo_train_planas)) ejecutar("cleaning")
   ejecutar_final("folds")
   if (correr_texto_python) ejecutar_final("texto_python")

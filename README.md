@@ -57,10 +57,7 @@ Todo se corre desde la raíz del repositorio.
 Rscript main.R                 # flujo final completo (equivale a: Rscript main.R final)
 Rscript main.R xgboost         # solo el XGBoost final
 Rscript main.R random_forest   # solo el random forest
-Rscript main.R prueba          # prueba rapida con una muestra pequena (2000 anuncios)
 ```
-
-`Rscript main.R prueba [n]` copia una muestra de las bases a `03_outputs/prueba/` y corre ahi folds, modelos, ablacion y figuras (los modelos de Python con `--sample`), sin tocar los resultados reales. Sirve para comprobar que el entorno funciona antes de lanzar el flujo completo. Tarda unos 40 minutos con 2000 anuncios; la limpieza no se prueba porque no tiene modo muestra.
 
 Si falta `01_data/02_clean/train_planas.csv`, el flujo corre primero la limpieza (`cleaning`), que además genera los embeddings E5 (ver tiempos). Los bloques sueltos se piden por nombre: `folds`, `texto_python`, `modelos_texto`, `xgboost`, `random_forest`, `modelos_python`, `ablacion`, `figuras`.
 
