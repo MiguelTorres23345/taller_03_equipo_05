@@ -1,0 +1,2 @@
+modelo,archivo,nrounds,max_depth,eta,min_child_weight,MAE_cv_millones
+XGB,XGB_nrounds_300_depth_8_eta_0.01_txt.csv,300,8,0.01,50,124.2103961192667

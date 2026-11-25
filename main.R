@@ -37,6 +37,10 @@ archivo_train_clean <- file.path(dir_datos_clean, "train_clean.rds")
 archivo_test_clean <- file.path(dir_datos_clean, "test_clean.rds")
 crs_espacial_nn <- 3116L
 
+# Verificacion: la raiz esta bien definida
+stopifnot("No se encuentra train.csv, abrir el proyecto taller_03_equipo_05.Rproj o fijar el directorio en la raiz del taller" =
+            file.exists(archivo_train))
+
 # ------------------------------------------------------------------------------
 # (2) Ejecutar preparacion y modelos
 # ------------------------------------------------------------------------------

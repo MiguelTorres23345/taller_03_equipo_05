@@ -1,6 +1,7 @@
-# ==============================================================================
+# ------------------------------------------------------------------------------
 # Archivo: 03_modelos.R
-# Proyecto: Problem Set 3 - Prediccion de precios de vivienda en Chapinero
+# Proyecto: Taller 3 - Big Data y Machine Learning
+#
 # Descripcion:
 #   Modelos del taller para el precio: random forest (ranger) y XGBoost. Los
 #   hiperparametros se escogen para minimizar el MAE. Cada modelo se corre con
@@ -8,34 +9,29 @@
 #   excluye del entrenamiento lo que esta a menos de distancia_buffer metros de
 #   ella. La otra usa bloques pequenos sin buffer, repetidos con varias semillas,
 #   para que la distancia entre lo que se valida y lo que se entrena se parezca a
-#   la del test. Las coordenadas del anuncio entran como predictores. Al final de
-#   cada modelo se predice el test y se exporta el archivo para Kaggle.
+#   la del test. Las coordenadas del anuncio y la prediccion de texto (modelo
+#   MiniLM ajustado en Colab por otro integrante del equipo) entran como
+#   predictores. Al final de cada modelo se predice el test y se exporta el
+#   archivo para Kaggle.
 # Input:
-#   train_planas.csv y test_planas.csv (salida de 02_variables_planas.R) y el
-#   shapefile de localidades de Bogota (IDECA, Loca.shp).
-#   Las columnas de seguimiento de la limpieza y los textos no entran al modelo.
+#   train_planas.csv y test_planas.csv (01_data/clean, salida de
+#   02_variables_planas.R), el shapefile de localidades de Bogota (IDECA,
+#   Loca.shp, en 01_data/Localidades) y
+#   text_finetune_minilm_train.csv y text_finetune_minilm_test.csv (01_data/02_text,
+#   salida del Colab de texto, una fila por property_id con txt_ft_minilm_lnp).
+#   Las columnas de seguimiento de la limpieza y los textos no entran al modelo,
+#   solo la prediccion de texto. Se corre desde main.R.
 # Output:
-#   CSV de predicciones en la carpeta submits y tabla de resultados del modelo.
-# ==============================================================================
+#   CSV de predicciones y tablas de resultados en 03_outputs/submits.
+# ------------------------------------------------------------------------------
 
 
 # ------------------------------------------------------------------------------
-# (1) Paquetes y rutas
+# (1) Rutas y parametros
 # ------------------------------------------------------------------------------
 
-library(dplyr)
-library(readr)
-library(sf)
-library(caret)
-library(ranger)
-library(xgboost)
-library(rsample)
-library(spatialsample)
-
-dir_datos <- "C:/Users/aeste/OneDrive/Documentos/10 Semestre/Big Data ML/Taller 3"
-dir_clean <- file.path(dir_datos, "clean")
-dir_submit <- file.path(dir_datos, "submits")
-archivo_localidades <- file.path(dir_datos, "localidades", "Loca.shp")
+# dir_clean, dir_texto, dir_externos y dir_submit vienen de main.R
+archivo_localidades <- file.path(dir_externos, "Localidades", "Loca.shp")
 
 # Metros que se excluyen alrededor de la localidad que se valida
 distancia_buffer <- 300
@@ -50,14 +46,23 @@ n_semillas <- 3
 
 # Texto que se agrega al nombre de los archivos de salida, para no sobrescribir
 # los de corridas anteriores
-sufijo <- "_coord"
+sufijo <- "_txt"
 
 n_arboles <- 500
+
+# Nucleos para correr los folds de caret en paralelo. Se limita a 4 porque cada
+# nucleo guarda en memoria un bosque o un modelo a la vez
+n_nucleos <- max(1, min(4, parallel::detectCores() - 1))
+
+# Largo de cada vector de semillas de caret, al menos el tamano de la grilla mas
+# grande (se verifica en la seccion 9)
+n_modelos_max <- 50
+
 vars_modelo <- c("surface_covered", "bedrooms", "bathrooms", "property_type",
                  "month", "year", "estrato", "valor_ref", "uso", "incidentes",
                  "dist_est5", "dist_est6", "prop_comercio", "dist_parque",
                  "dist_restaurante", "dist_universidad", "dist_financiero",
-                 "dist_avenida", "dist_tm", "coord_x", "coord_y")
+                 "dist_avenida", "dist_tm", "coord_x", "coord_y", "txt_ft_minilm_lnp")
 
 dir.create(dir_submit, recursive = TRUE, showWarnings = FALSE)
 
@@ -68,6 +73,20 @@ dir.create(dir_submit, recursive = TRUE, showWarnings = FALSE)
 
 train_planas <- read_csv(file.path(dir_clean, "train_planas.csv"), show_col_types = FALSE)
 test_planas <- read_csv(file.path(dir_clean, "test_planas.csv"), show_col_types = FALSE)
+
+# Prediccion de texto (log del precio) del Colab de texto. Las bases del Colab
+# tienen todos los anuncios originales, asi que se pegan por property_id y las
+# filas que la limpieza elimino se descartan. El orden de las filas no cambia
+texto_train <- read_csv(file.path(dir_texto, "text_finetune_minilm_train.csv"), show_col_types = FALSE)
+texto_test <- read_csv(file.path(dir_texto, "text_finetune_minilm_test.csv"), show_col_types = FALSE)
+stopifnot(!anyDuplicated(texto_train$property_id), !anyDuplicated(texto_test$property_id))
+
+n_train <- nrow(train_planas)
+n_test <- nrow(test_planas)
+train_planas <- left_join(train_planas, texto_train, by = "property_id")
+test_planas <- left_join(test_planas, texto_test, by = "property_id")
+stopifnot(nrow(train_planas) == n_train, nrow(test_planas) == n_test,
+          !anyNA(train_planas$txt_ft_minilm_lnp), !anyNA(test_planas$txt_ft_minilm_lnp))
 
 # El shapefile viene en grados (MAGNA). Todo se trabaja en el sistema MAGNA
 # Colombia Bogota (EPSG 3116, metros), que es el que usa el buffer
@@ -97,6 +116,15 @@ fun_preparar <- function(.db, .ref) {
     }
   }
   .db
+}
+
+# Semillas de caret, una por fold y modelo. Con ellas el resultado de cada fold
+# no depende de si los folds corren en paralelo o uno tras otro, y se repite igual
+# en cada corrida
+fun_semillas <- function(.n_folds, .n_modelos, .semilla = 2026) {
+  set.seed(.semilla)
+  c(lapply(seq_len(.n_folds), function(i) sample.int(1e6, .n_modelos)),
+    list(sample.int(1e6, 1)))
 }
 
 # Metrica para caret: MAE de cada fold
@@ -153,8 +181,15 @@ ctrl_mae <- trainControl(
   index = folds_caret$index,
   indexOut = folds_caret$indexOut,
   summaryFunction = fun_mae,
-  savePredictions = "final"
+  savePredictions = "final",
+  seeds = fun_semillas(length(folds_caret$index), n_modelos_max),
+  allowParallel = TRUE
 )
+
+# Los folds de caret se reparten entre n_nucleos procesos. Cada modelo usa un solo
+# hilo (num.threads y nthread en train) para no saturar el computador
+cl <- makeCluster(n_nucleos)
+registerDoParallel(cl)
 
 
 # ------------------------------------------------------------------------------
@@ -195,7 +230,8 @@ rf_mae <- train(
   trControl = ctrl_mae,
   tuneGrid = rf_grid,
   num.trees = n_arboles,
-  importance = "impurity"
+  importance = "impurity",
+  num.threads = 1
 )
 
 rf_mae
@@ -275,6 +311,7 @@ xgb_grid <- expand.grid(
   min_child_weight = c(20, 50),
   subsample = 0.8
 )
+stopifnot(max(nrow(rf_grid), nrow(xgb_grid)) <= n_modelos_max)
 
 set.seed(2026)
 xgb_mae <- train(
@@ -285,7 +322,8 @@ xgb_mae <- train(
   maximize = FALSE,
   trControl = ctrl_mae,
   tuneGrid = xgb_grid,
-  verbosity = 0
+  verbosity = 0,
+  nthread = 1
 )
 
 xgb_mae
@@ -381,7 +419,9 @@ ctrl_bloques <- trainControl(
   index = indices_bloques,
   indexOut = indices_fuera_bloques,
   summaryFunction = fun_mae,
-  savePredictions = "final"
+  savePredictions = "final",
+  seeds = fun_semillas(length(indices_bloques), n_modelos_max),
+  allowParallel = TRUE
 )
 
 
@@ -399,7 +439,8 @@ rf_bloques <- train(
   trControl = ctrl_bloques,
   tuneGrid = rf_grid,
   num.trees = n_arboles,
-  importance = "impurity"
+  importance = "impurity",
+  num.threads = 1
 )
 
 rf_bloques
@@ -456,7 +497,8 @@ xgb_bloques <- train(
   maximize = FALSE,
   trControl = ctrl_bloques,
   tuneGrid = xgb_grid,
-  verbosity = 0
+  verbosity = 0,
+  nthread = 1
 )
 
 xgb_bloques
@@ -501,3 +543,6 @@ resultados_xgb_bloques <- data.frame(modelo = "XGB_bloques", archivo = name_xgb_
                                      MAE_cv_millones = mae_xgb_bloques)
 write_csv(resultados_xgb_bloques, file.path(dir_submit, paste0("resultados_xgb_bloques", sufijo, ".csv")))
 print(resultados_xgb_bloques)
+
+# Cerrar los procesos en paralelo
+stopCluster(cl)

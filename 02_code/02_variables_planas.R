@@ -17,8 +17,10 @@
 #   shapefile Valor_Ref_M_2020 de Catastro Distrital y el shapefile
 #   GUsoMZ2020 (uso predominante por manzana), IRSCAT (incidentes
 #   reportados por sector catastral, IDECA) y el shapefile de estaciones
-#   troncales de TransMilenio. El extracto de OpenStreetMap se descarga con
-#   osmextract la primera vez y se guarda en la carpeta osm.
+#   troncales de TransMilenio, todos en 01_data. El extracto de
+#   OpenStreetMap se descarga con osmextract la primera vez y se guarda en
+#   01_data/osm. Se corre desde main.R, que carga los paquetes y
+#   define las rutas.
 # Output:
 #   Objetos train_planas y test_planas y sus CSV en la carpeta de datos limpios,
 #   con coordenadas metricas para la validacion espacial y las columnas
