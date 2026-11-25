@@ -55,6 +55,7 @@ SEED = 2026
 ROOT = Path(__file__).resolve().parents[1]
 DIR_RAW = ROOT / "01_data" / "01_raw"
 DIR_TEXT = ROOT / "01_data" / "02_text"
+ARCHIVO_FOLDS = ROOT / "01_data" / "02_clean" / "folds.csv"  # lo crea 13_folds.R
 DIR_OUT = ROOT / "03_outputs" / "02_text"
 
 # Atajos para los modelos; tambien se puede pasar cualquier id de Hugging Face
@@ -108,6 +109,18 @@ if args.sample > 0:
 train = train.reset_index(drop=True)
 test = test.reset_index(drop=True)
 
+# Folds compartidos con los modelos de R (13_folds.R). Solo estan los anuncios
+# unicos que dejo 01_cleaning.R: se descartan los duplicados de train, para que
+# una copia del mismo anuncio no caiga en otro fold. Con --sample no se usan.
+tabla_folds = None
+if ARCHIVO_FOLDS.exists() and args.sample == 0:
+    tabla_folds = pd.read_csv(ARCHIVO_FOLDS)
+    train = train.merge(tabla_folds[["property_id", "fold_espacial"]],
+                        on="property_id", how="inner").reset_index(drop=True)
+    print(f"Folds de {ARCHIVO_FOLDS.name}: {len(train)} anuncios unicos")
+else:
+    print("AVISO: sin folds.csv, se usan folds de KMeans (corra 13_folds.R antes)")
+
 
 def limpiar_texto(titulo, descripcion):
     t = f"{titulo if isinstance(titulo, str) else ''}. " \
@@ -123,10 +136,16 @@ texto_train = [limpiar_texto(a, b) for a, b in zip(train["title"], train["descri
 texto_test = [limpiar_texto(a, b) for a, b in zip(test["title"], test["description"])]
 y_train = np.log(train["price"].to_numpy())
 
-coords = train[["lat", "lon"]].fillna(train[["lat", "lon"]].median()).to_numpy()
-grupos = KMeans(n_clusters=min(args.n_clusters, len(train) // 10), random_state=SEED,
-                n_init=10).fit_predict(coords)
-folds = list(GroupKFold(n_splits=args.n_folds).split(coords, groups=grupos))
+if tabla_folds is not None:
+    id_fold = train["fold_espacial"].to_numpy()
+    folds = [(np.where(id_fold != k)[0], np.where(id_fold == k)[0])
+             for k in sorted(np.unique(id_fold))]
+    args.n_folds = len(folds)
+else:
+    coords = train[["lat", "lon"]].fillna(train[["lat", "lon"]].median()).to_numpy()
+    grupos = KMeans(n_clusters=min(args.n_clusters, len(train) // 10), random_state=SEED,
+                    n_init=10).fit_predict(coords)
+    folds = list(GroupKFold(n_splits=args.n_folds).split(coords, groups=grupos))
 folds_correr = range(args.n_folds) if args.folds == "all" else \
     [int(f) for f in args.folds.split(",")]
 

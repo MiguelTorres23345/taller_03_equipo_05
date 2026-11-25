@@ -1,0 +1,2 @@
+modelo,archivo,mtry,min.node.size,MAE,MAE_chapinero,error_medio,pct_sobreestima
+RF_bloques,RF_bloques_mtry_14_nodo_40_coord_texto_ft.csv,14,40,119.1695719593239,161.5431061076725,3.078752436885477,58.71854857018764

@@ -1,0 +1,2 @@
+modelo,archivo,nrounds,max_depth,eta,min_child_weight,MAE,MAE_chapinero,error_medio,pct_sobreestima
+XGB_bloques,XGB_bloques_nrounds_1000_depth_8_eta_0.01_coord_texto_ft.csv,1000,8,0.01,20,114.58042057567944,147.8969370941518,-0.2867782661446727,56.48277019357004
