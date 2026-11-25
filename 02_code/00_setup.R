@@ -38,7 +38,15 @@ paquetes <- switch(if (bloque == "regresion_log") "regresion_basica" else bloque
   modelos_limpios = c("readr", "dplyr", "openxlsx", "ranger", "xgboost", "lightgbm"),
   regresion_basica = c("readr", "dplyr", "openxlsx", "glmnet", "rpart"),
   seleccion_xgboost = c("dplyr", "xgboost"),
-  xgboost_text_svd = c("readr", "xgboost", "reticulate")
+  xgboost_text_svd = c("readr", "xgboost", "reticulate"),
+  # Flujo final (13_folds.R a 18_figura_bloques.R). Cada script carga sus
+  # paquetes con library(); aqui solo se instalan los que falten.
+  folds = c("readr", "dplyr", "sf", "rsample", "spatialsample"),
+  modelos_texto = c("readr", "dplyr", "sf", "caret", "ranger", "xgboost",
+                    "rsample", "spatialsample"),
+  ablacion = c("readr", "dplyr", "sf", "xgboost", "ggplot2"),
+  figuras = c("readr", "dplyr", "sf", "ggplot2", "patchwork", "rsample",
+              "spatialsample")
 )
 p_load(char = paquetes, update = FALSE)
 faltantes <- setdiff(paquetes, .packages())

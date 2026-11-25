@@ -12,3 +12,23 @@
 /01_data/02_text/finetune/
 /03_outputs/
 __pycache__/
+
+# Entornos y cachés de Python y Jupyter
+.venv/
+venv/
+.ipynb_checkpoints/
+*.pyc
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# Modelos binarios, regenerables al correr los scripts
+*.rds
+*.ubj
+
+# Registros de ejecucion y pruebas rapidas (--sample)
+/03_outputs/logs/
+/03_outputs/*_prueba/
+/01_data/02_text/*_s[0-9]*.csv
+/03_outputs/02_text/*_s[0-9]*.csv

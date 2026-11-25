@@ -22,13 +22,15 @@
 # Output:
 #   03_outputs/03_python/ (tablas, figuras) y 03_outputs/03_python/submits/
 # Uso:
-#   python 02_code/12_models_python_rf_xgb.py     (no necesita GPU)
+#   python 02_code/12_models_python_rf_xgb.py                 (completo, sin GPU)
+#   python 02_code/12_models_python_rf_xgb.py --sample 600    (prueba rapida)
 # ------------------------------------------------------------------------------
 
 # ------------------------------------------------------------------------------
 # (1) Paquetes y rutas
 # ------------------------------------------------------------------------------
 
+import argparse
 import time
 from itertools import product
 from pathlib import Path
@@ -44,9 +46,19 @@ from xgboost import XGBRegressor
 
 ROOT = Path.cwd().parent if Path.cwd().name == '02_code' else Path.cwd()
 
-DIR_CLEAN = ROOT / '01_data' / 'clean'
+parser = argparse.ArgumentParser()
+parser.add_argument('--sample', type=int, default=0,
+                    help='prueba rapida: N anuncios de train y grilla minima (0 = completo)')
+args = parser.parse_args()
+
+# Bases de 02_variables_planas.R: 01_data/02_clean si ya se corrio el flujo; si no,
+# la copia guardada en el repositorio (01_data/clean)
+DIR_CLEAN = ROOT / '01_data' / '02_clean'
+if not (DIR_CLEAN / 'train_planas.csv').exists():
+    DIR_CLEAN = ROOT / '01_data' / 'clean'
 DIR_TEXT = ROOT / '01_data' / '02_text'
-DIR_OUT = ROOT / '03_outputs' / '03_python'
+# La prueba rapida escribe aparte para no pisar los resultados completos
+DIR_OUT = ROOT / '03_outputs' / ('03_python_prueba' if args.sample else '03_python')
 DIR_SUBMIT = DIR_OUT / 'submits'
 DIR_SUBMIT.mkdir(parents=True, exist_ok=True)
 
@@ -67,6 +79,10 @@ txt_tr = pd.read_csv(DIR_TEXT / 'text_features_train.csv')
 txt_te = pd.read_csv(DIR_TEXT / 'text_features_test.csv')
 ft_tr = pd.read_csv(DIR_TEXT / 'text_finetune_minilm_train.csv')
 ft_te = pd.read_csv(DIR_TEXT / 'text_finetune_minilm_test.csv')
+
+if args.sample:
+    train = train.sample(args.sample, random_state=2026).reset_index(drop=True)
+    test = test.head(args.sample).reset_index(drop=True)
 
 train = train.merge(txt_tr, on='property_id', how='left').merge(ft_tr, on='property_id', how='left')
 test = test.merge(txt_te, on='property_id', how='left').merge(ft_te, on='property_id', how='left')
@@ -167,6 +183,8 @@ def validar(crear_modelo, columnas):
 # ------------------------------------------------------------------------------
 
 grid_rf = list(product([0.33, 0.5], [5, 20]))   # (max_features, min_samples_leaf)
+if args.sample:
+    grid_rf = grid_rf[:1]
 res_rf = []
 for mf, hoja in grid_rf:
     t0 = time.time()
@@ -185,6 +203,8 @@ print('\nMejor RF:', {k: mejor_rf[k] for k in ['max_features', 'min_samples_leaf
 # ------------------------------------------------------------------------------
 
 grid_xgb = list(product([300, 600], [3, 6], [0.03, 0.1]))   # (n_estimators, max_depth, eta)
+if args.sample:
+    grid_xgb = grid_xgb[:1]
 res_xgb = []
 for n, d, eta in grid_xgb:
     t0 = time.time()

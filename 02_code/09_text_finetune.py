@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------------
-# Archivo: 05_text_finetune.py
+# Archivo: 09_text_finetune.py
 # Proyecto: Taller 3 - Big Data y Machine Learning
 #
 # Descripcion:
@@ -10,7 +10,7 @@
 #   pesos con una tasa de aprendizaje pequena.
 #
 #   La prediccion se usa como variable para los modelos de R, por eso es
-#   out-of-fold: se usan los mismos 5 folds espaciales de 04_text_features.py
+#   out-of-fold: se usan los mismos 5 folds espaciales de 06_text_features.py
 #   (KMeans sobre lat/lon + GroupKFold). Para cada fold se entrena un modelo
 #   con los otros 4, se predice el fold que se dejo por fuera y tambien test.
 #   La prediccion final de test es el promedio de los 5 modelos.
@@ -24,10 +24,28 @@
 #   01_data/02_text/text_finetune_<modelo>_{train,test}.csv    (al completar
 #     los 5 folds; columnas property_id y txt_ft_<modelo>_lnp)
 #   03_outputs/02_text/metricas_finetune_<modelo>.csv           (MAE por fold)
+# Por que se corrio en Google Colab:
+#   El fine-tuning actualiza TODOS los pesos del MiniLM (118 millones de parametros)
+#   durante 3 epocas y 5 folds. Los computadores del equipo no tienen GPU y en CPU
+#   cada fold tarda horas y el total varios dias. En Colab con una GPU T4 (gratis)
+#   termina en unos minutos por fold. El codigo esta completo en este repositorio;
+#   solo la ejecucion se hizo en Colab.
+# Como correrlo en Colab (GPU):
+#   1. Subir a Drive la carpeta taller3/ con 02_code/09_text_finetune.py y
+#      01_data/01_raw/train.csv y test.csv (y 01_data/02_clean/folds.csv, creado por
+#      13_folds.R, para usar los mismos folds que los modelos).
+#   2. Entorno de ejecucion > Cambiar tipo > T4 GPU.
+#   3. pip install -r requirements.txt (en Colab basta pip install sentence-transformers).
+#   4. python 02_code/09_text_finetune.py --model minilm
+#   Hay un paso a paso en 02_code/colab_texto.ipynb.
+# Modelo de Hugging Face: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+#   (se descarga solo la primera vez; es publico y no pide token).
+# Salida usada por el flujo local (no se vuelve a ajustar en local):
+#   01_data/02_text/text_finetune_minilm_train.csv y text_finetune_minilm_test.csv
 # Uso (en Colab con GPU):
-#   python 02_code/05_text_finetune.py --model minilm --folds 0     # 1 fold
-#   python 02_code/05_text_finetune.py --model beto                 # 5 folds
-#   python 02_code/05_text_finetune.py --model minilm --sample 400 --epochs 1
+#   python 02_code/09_text_finetune.py --model minilm --folds 0     # 1 fold
+#   python 02_code/09_text_finetune.py --model beto                 # 5 folds
+#   python 02_code/09_text_finetune.py --model minilm --sample 400 --epochs 1
 #                                                    # prueba rapida en CPU
 # ------------------------------------------------------------------------------
 
@@ -98,7 +116,7 @@ fijar_semilla(SEED)
 print(f"Modelo: {nombre_hf} | dispositivo: {DEVICE} | lr: {lr} | epocas: {args.epochs}")
 
 # ------------------------------------------------------------------------------
-# (2) Datos, texto y folds espaciales (igual que en 04_text_features.py)
+# (2) Datos, texto y folds espaciales (igual que en 06_text_features.py)
 # ------------------------------------------------------------------------------
 
 train = pd.read_csv(DIR_RAW / "train.csv")

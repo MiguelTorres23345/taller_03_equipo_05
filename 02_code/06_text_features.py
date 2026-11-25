@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------------
-# Archivo: 04_text_features.py
+# Archivo: 06_text_features.py
 # Proyecto: Taller 3 - Big Data y Machine Learning
 #
 # Descripcion:
@@ -31,8 +31,8 @@
 #   03_outputs/02_text/palabras_precio.csv palabras con mayor y menor efecto
 #     sobre el precio en el modelo TF-IDF.
 # Uso:
-#   python 02_code/04_text_features.py               # corrida completa
-#   python 02_code/04_text_features.py --sample 2000 # prueba rapida
+#   python 02_code/06_text_features.py               # corrida completa
+#   python 02_code/06_text_features.py --sample 2000 # prueba rapida
 # ------------------------------------------------------------------------------
 
 import argparse

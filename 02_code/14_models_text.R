@@ -51,6 +51,10 @@ n_semillas <- 3
 # solo las 23 variables de TF-IDF y MiniLM congelado (conjunto B)
 usar_finetune <- TRUE
 
+# Modelos que se ajustan: "rf" (random forest) y/o "xgb" (XGBoost). Por defecto los dos.
+# Desde main.R: Rscript main.R xgboost  (solo XGBoost) o Rscript main.R random_forest
+if (!exists("modelos_a_correr")) modelos_a_correr <- c("rf", "xgb")
+
 # Texto que se agrega al nombre de los archivos de salida
 sufijo <- if (usar_finetune) "_coord_texto_ft" else "_coord_texto"
 
@@ -244,6 +248,7 @@ ctrl_bloques <- trainControl(
 # (7) Random forest con validacion por bloques
 # ------------------------------------------------------------------------------
 
+if ("rf" %in% modelos_a_correr) {
 # Misma grilla que la ultima version de 05_modelos.R
 rf_grid <- expand.grid(
   mtry = c(5, 8, 11, 14),
@@ -303,12 +308,14 @@ resultados_rf_bloques <- data.frame(modelo = "RF_bloques", archivo = name_rf_blo
                                     fun_resumen(rf_bloques$pred))
 write_csv(resultados_rf_bloques, file.path(dir_submit, paste0("resultados_rf_bloques", sufijo, ".csv")))
 print(resultados_rf_bloques)
+}
 
 
 # ------------------------------------------------------------------------------
 # (8) XGBoost con validacion por bloques
 # ------------------------------------------------------------------------------
 
+if ("xgb" %in% modelos_a_correr) {
 # Desde xgboost 3.0, el metodo "xgbTree" de caret falla ("ALTLIST classes must
 # provide a Set_elt method") porque caret intenta escribir dentro del modelo. Este
 # metodo es el mismo xgbTree (misma grilla y perdida cuadratica) pero guarda el
@@ -412,3 +419,4 @@ resultados_xgb_bloques <- data.frame(modelo = "XGB_bloques", archivo = name_xgb_
                                      fun_resumen(xgb_bloques$pred))
 write_csv(resultados_xgb_bloques, file.path(dir_submit, paste0("resultados_xgb_bloques", sufijo, ".csv")))
 print(resultados_xgb_bloques)
+}

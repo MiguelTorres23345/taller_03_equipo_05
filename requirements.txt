@@ -1,0 +1,20 @@
+# Entorno de Python para 02_code/06_text_features.py, 09_text_finetune.py y
+# 12_models_python_rf_xgb.py. Versiones con las que se verifico el flujo (Python 3.14).
+# Instalacion (Windows, desde la raiz del repositorio):
+#   python -m venv .venv
+#   .venv\Scripts\python -m pip install -r requirements.txt
+# En Linux o Mac: python -m venv .venv && .venv/bin/python -m pip install -r requirements.txt
+# torch se instala en su version CPU desde el indice de PyTorch. En Google Colab
+# (GPU) solo hace falta: pip install sentence-transformers (torch y transformers ya vienen).
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.15.0
+sentence-transformers==6.3.0
+transformers==5.24.0
+scikit-learn==1.9.1
+pandas==3.1.1
+numpy==2.5.5
+xgboost==3.4.1
+geopandas==1.2.0
+shapely==2.2.0
+pyogrio==0.13.0
+matplotlib==3.11.2
