@@ -7,26 +7,23 @@
 #   duplicados de train y completar el area (surface_covered) y los banos
 #   (bathrooms) con la informacion del titulo y la descripcion de cada anuncio.
 #   El titulo y la descripcion no se modifican: el texto se limpia solo en una
-#   copia temporal para buscar los patrones.
+#   copia temporal para buscar los patrones. Se unen variables de entorno y texto.
 # Input:
-#   train.csv y test.csv en la carpeta Taller 3.
+#   CSV originales, capas de entorno, predictores de texto y embeddings E5.
 # Output:
 #   train_clean y test_clean (objetos y archivos CSV en la carpeta clean) con
 #   surface_covered y bathrooms sin NA. Cada valor completado queda marcado en
 #   surface_source y bathrooms_source (base, texto o relleno), y area_text y
 #   bathrooms_text conservan lo encontrado en el texto.
+#   train_clean.rds y test_clean.rds guardan las bases unidas en 01_data/02_clean.
 # ------------------------------------------------------------------------------
 
 
 # ------------------------------------------------------------------------------
-# (1) Paquetes y rutas
+# (1) Definir la ruta de salida y el minimo de imputacion
 # ------------------------------------------------------------------------------
 
-library(dplyr)
-library(readr)
-
-dir_datos <- "C:/Users/aeste/OneDrive/Documentos/10 Semestre/Big Data ML/Taller 3"
-dir_clean <- file.path(dir_datos, "clean")
+dir_clean <- dirname(archivo_train_clean)
 
 # Tamanio minimo de un grupo para usar su moda o mediana en el relleno
 n_minimo <- 10
@@ -36,8 +33,9 @@ n_minimo <- 10
 # (2) Importar las bases originales
 # ------------------------------------------------------------------------------
 
-db_train <- read_csv(file.path(dir_datos, "train.csv"), show_col_types = FALSE)
-db_test <- read_csv(file.path(dir_datos, "test.csv"), show_col_types = FALSE)
+tipo_id <- cols(property_id = col_character())
+db_train <- read_csv(archivo_train, col_types = tipo_id, show_col_types = FALSE)
+db_test <- read_csv(archivo_test, col_types = tipo_id, show_col_types = FALSE)
 
 
 # ------------------------------------------------------------------------------
@@ -53,7 +51,7 @@ db_test <- read_csv(file.path(dir_datos, "test.csv"), show_col_types = FALSE)
 fun_eliminar_duplicados <- function(.db) {
   llaves <- c("description", "price", "lat", "lon", "bedrooms", "bathrooms",
               "property_type")
-  
+
   .db <- .db |>
     mutate(
       fila = row_number(),
@@ -64,10 +62,10 @@ fun_eliminar_duplicados <- function(.db) {
     group_by(across(all_of(llaves))) |>
     mutate(grupo = cur_group_id(), n_copias = n(), n_meses = n_distinct(periodo)) |>
     ungroup()
-  
+
   repetidos <- .db |> filter(n_copias > 1, n_meses > 1)
   unicos <- .db |> filter(!(n_copias > 1 & n_meses > 1))
-  
+
   # Primer dato disponible, de la copia mas reciente a la mas antigua
   recientes <- repetidos |>
     arrange(grupo, desc(periodo)) |>
@@ -77,7 +75,7 @@ fun_eliminar_duplicados <- function(.db) {
              ~ .x[!is.na(.x)][1], .names = "{.col}_rec"),
       .groups = "drop"
     )
-  
+
   conservados <- repetidos |>
     arrange(grupo, n_na, desc(periodo)) |>
     group_by(grupo) |>
@@ -89,7 +87,7 @@ fun_eliminar_duplicados <- function(.db) {
       surface_covered = coalesce(surface_covered, surface_covered_rec),
       rooms = coalesce(rooms, rooms_rec)
     )
-  
+
   bind_rows(unicos, conservados) |>
     arrange(fila) |>
     select(-c(fila, periodo, n_na, grupo, n_copias, n_meses),
@@ -179,7 +177,7 @@ fun_letras_a_digitos <- function(.texto) {
   ini <- attr(m, "capture.start")
   largo <- attr(m, "capture.length")
   grupo <- function(i, k) substr(.texto, ini[i, k], ini[i, k] + largo[i, k] - 1)
-  
+
   nuevos <- character(length(m))
   for (i in seq_along(m)) {
     valor <- decenas[[grupo(i, 2)]]
@@ -210,7 +208,7 @@ fun_area_texto <- function(.texto, .tipo) {
   if (m[1] == -1) return(NA_real_)
   ini <- attr(m, "capture.start")
   largo <- attr(m, "capture.length")
-  
+
   prioridad <- c()
   posicion <- c()
   valor <- c()
@@ -220,11 +218,11 @@ fun_area_texto <- function(.texto, .tipo) {
     cifra <- substr(texto, ini[i, 1], ini[i, 1] + largo[i, 1] - 1)
     unidad <- substr(texto, ini[i, 2], ini[i, 2] + largo[i, 2] - 1)
     v <- fun_numero(cifra)
-    
+
     # "m23" se lee como "m2"
     unidad <- sub("^(metros|metro|mtros|mtrs|mtr|mts|mt|m)2\\d+$", "\\12", unidad,
                   perl = TRUE)
-    
+
     # Palabras antes de la cifra (se ignoran las de relleno y los numeros)
     antes <- tail(fun_palabras(substr(texto, 1, inicio - 1)), 6)
     antes[antes == "rea"] <- "area"
@@ -232,14 +230,14 @@ fun_area_texto <- function(.texto, .tipo) {
     antes <- antes[!(antes %in% palabras_relleno) & !grepl("^\\d+$", antes)]
     izq1 <- if (length(antes) > 0) tail(antes, 1) else "<inicio>"
     izq2 <- if (length(antes) > 1) tail(antes, 2)[1] else "<inicio>"
-    
+
     # Palabra despues de la unidad (se saltan articulos, "de", "en", "cuadrados")
     despues <- head(fun_palabras(substr(texto, fin + 1, fin + 40)), 4)
     while (length(despues) > 0 && despues[1] %in% palabras_salto) {
       despues <- despues[-1]
     }
     der1 <- if (length(despues) > 0) despues[1] else "<fin>"
-    
+
     # "85 m" solo cuenta si va despues de una palabra tipica de area
     if (unidad == "m" && !(izq1 %in% palabras_area)) next
     # "40 m2 de area construida 20 m2 de terraza": la palabra "construida" ya
@@ -282,7 +280,7 @@ fun_area_texto <- function(.texto, .tipo) {
     }
     # "85 m2 mas 12 m2 de terraza": la segunda cifra es un adicional
     if (previa %in% c("ms", "mas")) next
-    
+
     # Prioridad: dice construida (0), area o total (1), resto (2)
     if (izq1 %in% c("construida", "construccion", "construido", "construidos") ||
         izq2 %in% c("construida", "construccion") ||
@@ -299,7 +297,7 @@ fun_area_texto <- function(.texto, .tipo) {
     posicion <- c(posicion, inicio)
     valor <- c(valor, v)
   }
-  
+
   if (length(valor) == 0) return(NA_real_)
   valor[order(prioridad, posicion)][1]
 }
@@ -334,7 +332,7 @@ fun_numero_bano <- function(.palabra) {
 fun_banos_texto <- function(.texto) {
   palabras <- fun_palabras(.texto)
   posiciones <- which(palabras %in% c("bano", "banos"))
-  
+
   n_explicito <- NA_real_
   suma_uno <- 0
   for (j in posiciones) {
@@ -347,7 +345,7 @@ fun_banos_texto <- function(.texto) {
       n_explicito <- n
     }
   }
-  
+
   data.frame(
     n_explicito = n_explicito,
     n_menciones = length(posiciones),
@@ -361,7 +359,7 @@ fun_banos_texto <- function(.texto) {
 fun_extraer_texto <- function(.db) {
   texto <- fun_texto(.db$title, .db$description)
   banos <- bind_rows(lapply(texto, fun_banos_texto))
-  
+
   .db |>
     mutate(
       area_text = mapply(fun_area_texto, texto, property_type, USE.NAMES = FALSE),
@@ -533,9 +531,45 @@ stopifnot(sum(is.na(train_clean$surface_covered)) == 0,
 
 
 # ------------------------------------------------------------------------------
-# (6) Exportar las bases finales
+# (6) Agregar entorno, texto y embeddings
 # ------------------------------------------------------------------------------
 
+source(file.path(dir_codigo, "02_variables_planas.R"), local = TRUE, encoding = "UTF-8")
+embeddings_clean <- readRDS(archivo_embeddings_clean)
+
+unir_texto <- function(base, particion) {
+  texto <- read_csv(file.path(dir_datos_texto, paste0("text_features_", particion, ".csv")),
+                    col_types = tipo_id, show_col_types = FALSE)
+  minilm <- read_csv(file.path(dir_datos_texto, paste0("text_finetune_minilm_", particion, ".csv")),
+                     col_types = tipo_id, show_col_types = FALSE)
+  ids <- base$property_id
+  stopifnot(!anyNA(ids), !anyDuplicated(ids),
+            !anyDuplicated(texto$property_id), !anyDuplicated(minilm$property_id),
+            all(ids %in% texto$property_id), all(ids %in% minilm$property_id),
+            all(ids %in% rownames(embeddings_clean[[particion]])))
+
+  # Alinear las fuentes por ID. Eliminar duplicados de train no pierde avisos de test.
+  bind_cols(base, texto[match(ids, texto$property_id), -1L],
+            minilm[match(ids, minilm$property_id), -1L],
+            as.data.frame(embeddings_clean[[particion]][ids, , drop = FALSE]))
+}
+
+train_final <- unir_texto(train_planas, "train")
+test_final <- unir_texto(test_planas, "test")
+plantilla <- read_csv(archivo_plantilla, col_types = tipo_id, show_col_types = FALSE)
+orden_test <- match(plantilla$property_id, test_final$property_id)
+stopifnot(!anyNA(orden_test), length(orden_test) == nrow(test_final))
+test_final <- test_final[orden_test, ]
+
+# ------------------------------------------------------------------------------
+# (7) Exportar las bases finales
+# ------------------------------------------------------------------------------
+
+dir_clean <- dirname(archivo_train_clean)
 dir.create(dir_clean, recursive = TRUE, showWarnings = FALSE)
 write_csv(train_clean, file.path(dir_clean, "train_clean.csv"))
 write_csv(test_clean, file.path(dir_clean, "test_clean.csv"))
+saveRDS(train_final, archivo_train_clean, compress = FALSE)
+saveRDS(test_final, archivo_test_clean, compress = FALSE)
+message(sprintf("Bases limpias guardadas | train %d | test %d",
+                nrow(train_final), nrow(test_final)))

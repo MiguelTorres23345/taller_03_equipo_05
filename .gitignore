@@ -2,3 +2,13 @@
 .Rhistory
 .RData
 .Ruserdata
+
+# Archivos generados por la replica
+/.deps_nn/
+/01_data/01_raw/*.csv
+/01_data/02_clean/
+/01_data/01_raw/fuentes_externas/osm/
+/01_data/02_text/cache/
+/01_data/02_text/finetune/
+/03_outputs/
+__pycache__/

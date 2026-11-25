@@ -2,30 +2,27 @@
 # Archivo: 09_models_text_svd.R
 # Proyecto: Taller 3 - Big Data y Machine Learning
 # Descripcion: Reproducir el XGBoost con TF-IDF corregido y SVD elegido para la entrega.
-# Input: train_clean.rds y test_clean.rds de 01_cleaning.R y plantilla original.
-# Output: CSV del modelo seleccionado y resumen.txt en 07_models_text_svd.
-#          El modo cv_final recalcula solo la validacion del modelo seleccionado.
+# Input: train_clean.rds y test_clean.rds de 01_cleaning.R, plantilla y seleccion de 08_models_clean_data.R.
+# Output: CSV del modelo seleccionado y resumen.txt en 04_models_text_svd.
 # ------------------------------------------------------------------------------
 
 # ------------------------------------------------------------------------------
 # (1) Identificar la configuracion seleccionada
 # ------------------------------------------------------------------------------
 
-ejecutar_xgboost_final <- function(archivo_train_clean, archivo_test_clean,
-                                    archivo_plantilla, salida, modo = "modelo_final") {
+ejecutar_xgboost_text_svd <- function(archivo_train_clean, archivo_test_clean,
+                                    archivo_plantilla, salida, seleccion) {
   semilla <- 2026L
   hilos <- 4L
   componentes <- 32L
-  lado_bloque <- 400L
-  rondas <- 400L
-  # Ganador del ranking xgboost_clean_data de 08_models_clean_data.R.
-  # Esa grilla se evaluo con 438 predictores, incluidos los embeddings E5.
-  hp <- list(objective = "reg:quantileerror", quantile_alpha = 1/3,
+  lado_bloque <- seleccion$lado_bloque_m
+  rondas <- seleccion$nrounds
+  hp <- list(objective = "reg:quantileerror", quantile_alpha = 1 / 3,
              tree_method = "hist", nthread = hilos, seed = semilla,
-             eta = 0.05, max_depth = 6L, min_child_weight = 30L,
-             subsample = 0.85, colsample_bytree = 0.9, lambda = 1, max_bin = 128L)
-  cv_seleccion <- c(perdida = 53413520.3635665, mae = 134560267.998439)
-  cv_final <- c(perdida = 52110825.71443468, mae = 131136753.58969337)
+             eta = seleccion$eta, max_depth = seleccion$max_depth,
+             min_child_weight = seleccion$min_child_weight,
+             subsample = seleccion$subsample, colsample_bytree = seleccion$colsample_bytree,
+             lambda = seleccion$lambda, max_bin = seleccion$max_bin)
   nombre <- sprintf("[model]XGBoost_tfidf_svd%d_corregido_nrounds_%d_eta_%s_depth_%d_min_child_%d.csv",
                     componentes, rondas, format(hp$eta, decimal.mark = ".", trim = TRUE),
                     hp$max_depth, hp$min_child_weight)
@@ -36,15 +33,17 @@ ejecutar_xgboost_final <- function(archivo_train_clean, archivo_test_clean,
 
   rutas <- c(archivo_train_clean, archivo_test_clean, archivo_plantilla)
   if (!all(file.exists(rutas))) {
-    stop("Faltan insumos del modelo final: ",
+    stop("Faltan insumos del XGBoost con TF-IDF: ",
          paste(rutas[!file.exists(rutas)], collapse = ", "),
-         ". Prepare las bases limpias antes de correr el modelo.", call. = FALSE)
+         ". Prepare las bases con Rscript main.R cleaning.", call. = FALSE)
   }
   train <- readRDS(archivo_train_clean)
   test <- readRDS(archivo_test_clean)
   tipo_id <- readr::cols(property_id = readr::col_character())
-  plantilla <- readr::read_csv(archivo_plantilla, col_types = tipo_id, show_col_types = FALSE)
-  stopifnot(!anyDuplicated(train$property_id), !anyDuplicated(test$property_id),
+  plantilla <- readr::read_csv(archivo_plantilla, col_types = tipo_id,
+                                col_select = property_id, show_col_types = FALSE)
+  stopifnot(!anyNA(test$property_id), !anyNA(plantilla$property_id),
+            !anyDuplicated(train$property_id), !anyDuplicated(test$property_id),
             !anyDuplicated(plantilla$property_id), all(is.finite(train$price)),
             setequal(test$property_id, plantilla$property_id))
 
@@ -79,10 +78,6 @@ ejecutar_xgboost_final <- function(archivo_train_clean, archivo_test_clean,
   }
   stopifnot(ncol(x) == 54L)
   texto <- function(z) ifelse(is.na(z), "", z)
-  if (!nzchar(Sys.getenv("RETICULATE_PYTHON"))) {
-    python <- Sys.which(c("python", "python3"))
-    if (any(nzchar(python))) reticulate::use_python(python[nzchar(python)][1L], required = TRUE)
-  }
   py <- reticulate::import_main()
   reticulate::py_set_attr(py, "documentos", enc2utf8(paste(
     texto(base$title), texto(base$description), sep = ". "
@@ -149,68 +144,55 @@ def proyectar(ajuste, validacion, componentes, semilla):
     stopifnot(all(is.finite(pred)))
     pred
   }
-  origen_cv <- "CV registrada del modelo seleccionado"
-  if (modo == "cv_final") {
-    coords <- as.matrix(train[c("coord_x", "coord_y")])
-    celdas <- floor(sweep(coords, 2L, apply(coords, 2L, min)) / lado_bloque)
-    bloque <- paste(celdas[, 1L], celdas[, 2L], sep = "_")
-    bloques <- sort(unique(bloque), method = "radix")
-    set.seed(semilla)
-    reparto <- setNames(sample(rep(seq_len(5L), length.out = length(bloques))), bloques)
-    fold <- unname(reparto[bloque])
-    error <- numeric(n)
-    for (k in seq_len(5L)) {
-      b <- which(fold == k)
-      error[b] <- predecir(which(fold != k), b) - precio[b]
-      message("Fold ", k, " | ", length(b), " avisos")
-    }
-    cv_final <- c(perdida = mean((2/3) * pmax(error, 0) + (1/3) * pmax(-error, 0)),
-                   mae = mean(abs(error)))
-    origen_cv <- "CV recalculada del modelo seleccionado"
+  # Recalcular el desempeno de la configuracion elegida con TF-IDF dentro de cada fold.
+  coords <- as.matrix(train[c("coord_x", "coord_y")])
+  celdas <- floor(sweep(coords, 2L, apply(coords, 2L, min)) / lado_bloque)
+  bloque <- paste(celdas[, 1L], celdas[, 2L], sep = "_")
+  bloques <- sort(unique(bloque), method = "radix")
+  k_folds <- seleccion$k_folds
+  set.seed(semilla)
+  reparto <- setNames(sample(rep(seq_len(k_folds), length.out = length(bloques))), bloques)
+  fold <- unname(reparto[bloque])
+  error <- numeric(n)
+  for (k in seq_len(k_folds)) {
+    b <- which(fold == k)
+    error[b] <- predecir(which(fold != k), b) - precio[b]
+    message("TF-IDF/SVD | fold ", k, "/", k_folds)
   }
+  perdida_svd <- mean((2 / 3) * pmax(error, 0) + (1 / 3) * pmax(-error, 0))
 
-  # ----------------------------------------------------------------------------
+  # ------------------------------------------------------------------------------
   # (4) Exportar en el orden de la plantilla y guardar el resumen
-  # ----------------------------------------------------------------------------
+  # ------------------------------------------------------------------------------
 
   dir.create(salida, recursive = TRUE, showWarnings = FALSE)
-  if (modo == "modelo_final") {
-    pred <- predecir(filas_train, filas_test)
-    orden <- match(plantilla$property_id, test$property_id)
-    resultado <- data.frame(property_id = plantilla$property_id, price = pred[orden])
-    archivo_salida <- file.path(salida, nombre)
-    if (file.exists(archivo_salida)) {
-      anterior <- readr::read_csv(archivo_salida, col_types = tipo_id, show_col_types = FALSE)
-      coincide <- identical(anterior$property_id, resultado$property_id) &&
-        isTRUE(all(abs(anterior$price - resultado$price) <= 1))
-      if (!coincide) {
-        stop("El reajuste difiere del CSV elegido. Se conserva el archivo en ", archivo_salida,
-             call. = FALSE)
-      }
-    } else {
-      readr::write_csv(resultado, archivo_salida)
-    }
-  }
+  pred <- predecir(filas_train, filas_test)
+  orden <- match(plantilla$property_id, test$property_id)
+  stopifnot(length(pred) == nrow(test), !anyNA(orden))
+  resultado <- data.frame(property_id = plantilla$property_id, price = pred[orden])
+  readr::write_csv(resultado, file.path(salida, nombre))
   writeLines(c(
     nombre,
     "XGBoost con correccion ortografica, TF-IDF de palabras y bigramas y 32 componentes SVD",
     sprintf("Avisos de entrenamiento %d | Avisos de test %d | Predictores %d",
             n, nrow(test), ncol(x) + componentes),
     "",
-    "Seleccion historica de hiperparametros",
-    "Origen 08_models_clean_data.R | XGBoost con E5 | 36 combinaciones",
-    "Cinco folds espaciales de 400 m | criterio de seleccion perdida asimetrica",
+    sprintf("Seleccion en 08_models_clean_data.R | predictores con E5 | %d combinaciones",
+            seleccion$n_combinaciones),
+    sprintf("Cinco folds espaciales de %d m | criterio de seleccion perdida asimetrica",
+            lado_bloque),
     sprintf("Rondas %d | eta %.2f | profundidad %d | peso minimo del nodo %d",
             rondas, hp$eta, hp$max_depth, hp$min_child_weight),
     sprintf("Subsample %.2f | colsample_bytree %.2f | lambda %g | max_bin %d",
             hp$subsample, hp$colsample_bytree, hp$lambda, hp$max_bin),
     sprintf("Semilla %d | objetivo cuantil 1/3", semilla),
-    sprintf("CV de la configuracion ganadora con E5 | perdida %.2f | MAE %.2f millones de COP",
-            cv_seleccion[["perdida"]]/1e6, cv_seleccion[["mae"]]/1e6),
+    sprintf("CV con E5 | perdida %.2f | MAE %.2f millones de COP",
+            seleccion$perdida_asim_cop / 1e6, seleccion$mae_cop / 1e6),
     "",
-    origen_cv,
-    sprintf("Cinco folds espaciales de 400 m | perdida %.2f | MAE %.2f millones de COP",
-            cv_final[["perdida"]]/1e6, cv_final[["mae"]]/1e6)
+    sprintf("CV con TF-IDF/SVD | perdida %.2f | MAE %.2f millones de COP",
+            perdida_svd / 1e6, mean(abs(error)) / 1e6),
+    sprintf("MAE sobreestimacion %.2f | MAE subestimacion %.2f millones de COP",
+            mean(error[error > 0]) / 1e6, mean(-error[error < 0]) / 1e6)
   ), file.path(salida, "resumen.txt"))
   invisible(nombre)
 }

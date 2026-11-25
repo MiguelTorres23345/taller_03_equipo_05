@@ -1,216 +1,96 @@
 # ------------------------------------------------------------------------------
 # Archivo: 00_setup.R
 # Proyecto: Taller 3 - Big Data y Machine Learning
-#
-# Descripcion:
-#   Cargar pacman, instalar/cargar los demas paquetes y resolver conflictos
-#   entre funciones con el mismo nombre.
-# Input:
-#   Bloque activo y ruta de dependencias de main.R. Internet si faltan paquetes.
-#   ZIP opcionales de LibTorch y LibLantern en .deps_nn/descargas_torch/.
-# Output:
-#   Paquetes cargados y binarios de Torch y ONNX en .deps_nn/,
-#   y preferencias de funciones definidas en la sesion. No importa bases.
+# Descripcion: Instalar y cargar las dependencias necesarias para el bloque.
+# Input: Bloque y directorio de dependencias definidos en main.R.
+# Output: Paquetes cargados y funciones para preparar ONNX y Python.
 # ------------------------------------------------------------------------------
-
 
 # ------------------------------------------------------------------------------
 # (1) Cargar pacman
 # ------------------------------------------------------------------------------
 
-modo_taller <- getOption("taller3.modo_nn", "arboles")
-usar_nn <- modo_taller %in% c("preparar", "nn", "espacial")
-if (usar_nn) {
-  # Los paquetes nuevos del bloque de redes se instalan dentro del respaldo.
-  libreria_nn <- file.path(dir_dependencias_nn, "R")
-  dir.create(libreria_nn, recursive = TRUE, showWarnings = FALSE)
-  .libPaths(c(libreria_nn, .libPaths()))
-  Sys.setenv(TORCH_INSTALL = "0", CUDA = "cpu")
-  repos <- getOption("repos")
-  if (any(repos == "@CRAN@")) {
-    repos[repos == "@CRAN@"] <- "https://cloud.r-project.org"
-    options(repos = repos)
-  }
-}
-
+libreria <- file.path(dir_dependencias, "R")
+dir.create(libreria, recursive = TRUE, showWarnings = FALSE)
+.libPaths(c(libreria, .libPaths()))
+repos <- getOption("repos")
+repos[repos == "@CRAN@"] <- "https://cran.rstudio.com"
+options(repos = repos)
 if (!require("pacman", quietly = TRUE)) {
-  if (usar_nn) {
-    install.packages("pacman", type = .Platform$pkgType)
-  } else {
-    install.packages("pacman")
-  }
-  if (!require("pacman", quietly = TRUE)) {
-    stop("00_setup.R no pudo instalar pacman. Revise el acceso a CRAN.",
-         call. = FALSE)
-  }
+  install.packages("pacman")
+  library(pacman)
 }
 
 # ------------------------------------------------------------------------------
 # (2) Cargar los demas paquetes
 # ------------------------------------------------------------------------------
 
-# p_load() instala los paquetes faltantes y carga los instalados.
-if (usar_nn) {
-  paquetes_nn <- c(
-    "readr",       # Lectura y exportacion de CSV.
-    "dplyr",       # Combinacion de textos y tablas.
-    "openxlsx",    # Resumen de validacion en Excel.
-    "callr"       # Instalacion y comprobacion de Torch en otra sesion de R.
-  )
-  if (identical(modo_taller, "espacial")) paquetes_nn <- c(paquetes_nn, "sf")
-  # En Windows y macOS usar binarios para evitar compiladores e instaladores.
-  por_instalar <- setdiff(paquetes_nn, basename(find.package(paquetes_nn, quiet = TRUE)))
-  if (length(por_instalar)) install.packages(por_instalar, type = .Platform$pkgType)
-  p_load(char = paquetes_nn, install = FALSE, update = FALSE)
-  faltantes_nn <- setdiff(paquetes_nn, .packages())
-  if (length(faltantes_nn)) {
-    stop("No se pudieron cargar los paquetes de redes: ",
-         paste(faltantes_nn, collapse = ", "), call. = FALSE)
-  }
-} else p_load(
-  # (2.1) Datos y presentacion
-  tidyverse,     # Lectura de CSV, limpieza, agregacion, uniones y graficos.
-  readxl,        # Lectura de los archivos Excel de documentacion.
-  writexl,       # Exportacion de tablas descriptivas a Excel.
-  openxlsx,      # Exportacion de rankings con filtros y formatos de Excel.
-  Matrix,        # Matrices dispersas para la ecuacion de ingreso.
-  tidytext,      # Tokenizacion y TF-IDF de titulos y descripciones.
-
-  # (2.2) Entrenamiento y modelos
-  stats,         # lm() y glm(): modelo lineal, logit y probit (incluido en R).
-  lava,          # Dependencia indirecta de caret que falta en el entorno actual.
-  caret,         # Validacion cruzada, tuning y rebalanceo dentro de los folds.
-  glmnet,        # Ridge, lasso y elastic net para regresion y clasificacion.
-  MASS,          # Analisis discriminante lineal (LDA) y cuadratico (QDA).
-  naivebayes,    # Naive Bayes; motor naive_bayes de caret.
-  rpart,         # Arboles de clasificacion y regresion (CART).
-  rpart.plot,    # Visualizacion de los arboles ajustados con rpart.
-  ranger,        # Bagging y random forest con implementacion eficiente.
-  randomForest,  # Implementacion alternativa de random forest.
-  adabag,        # AdaBoost.M1 y bagging de arboles.
-  gbm,           # Gradient boosting de arboles.
-  xgboost,       # Extreme Gradient Boosting (XGBoost).
-  lightgbm,      # Light Gradient Boosting Machine (LightGBM).
-  nnet,          # Redes neuronales de una capa oculta para regresion.
-
-  # (2.3) Evaluacion
-  pROC,          # Curvas ROC, AUC y evaluacion de umbrales.
-  MLmetrics,     # Metricas de clasificacion; dependencia de prSummary de caret.
-  Metrics,       # Metricas de regresion y clasificacion.
-
-  # (2.4) Organizacion y replicabilidad
-  rstudioapi,    # Acceso al proyecto y al editor cuando se usa RStudio.
-  conflicted,    # Resuelve funciones homonimas entre paquetes.
-  docstring,     # Consulta de documentacion escrita dentro de funciones.
-  renv,          # Permite fijar/restaurar versiones cuando se valide el entorno.
-
-  # (2.5) Recoleccion web y datos espaciales
-  httr2,         # Descargas y consultas HTTP a APIs de datos abiertos.
-  rvest,         # Extraccion de tablas y campos de paginas HTML.
-  jsonlite,      # Lectura y conversion de respuestas y archivos JSON.
-  sf,            # Capas de OSM y del Distrito, cruces y distancias.
-  terra,          # Procesamiento de imagenes satelitales y otros raster.
-
-  reticulate
+# readr y dplyr leen y preparan las tablas. openxlsx exporta los resumenes.
+# ranger, xgboost, lightgbm y rpart ajustan arboles. glmnet ajusta Elastic Net.
+# sf y osmextract leen las capas.
+# sbert y digest identifican y generan los embeddings. reticulate ejecuta TF-IDF.
+paquetes <- switch(if (bloque == "regresion_log") "regresion_basica" else bloque,
+  arboles = c("readr", "dplyr", "openxlsx", "ranger", "xgboost", "lightgbm"),
+  nn = c("readr", "dplyr", "openxlsx", "sbert", "digest"),
+  nn_embeddings = c("readr", "dplyr", "sbert", "digest"),
+  cleaning = c("readr", "dplyr", "sf", "osmextract"),
+  modelos_limpios = c("readr", "dplyr", "openxlsx", "ranger", "xgboost", "lightgbm"),
+  regresion_basica = c("readr", "dplyr", "openxlsx", "glmnet", "rpart"),
+  seleccion_xgboost = c("dplyr", "xgboost"),
+  xgboost_text_svd = c("readr", "xgboost", "reticulate")
 )
+p_load(char = paquetes, update = FALSE)
+faltantes <- setdiff(paquetes, .packages())
+if (length(faltantes)) stop("Faltan paquetes de R: ", paste(faltantes, collapse = ", "), call. = FALSE)
 
-# (2.6) Preparar las dependencias locales de las redes
+instalar_onnx_nn <- function() {
+  tryCatch(sbert::install_runtime(cuda = FALSE), error = function(error) {
+    if (.Platform$OS.type != "windows" || R.version$arch != "x86_64") stop(error)
 
-preparar_torch_nn <- function(cache) {
-  ruta_torch <- find.package("torch", quiet = TRUE)
-  if (!length(ruta_torch)) {
-    install.packages("torch", type = .Platform$pkgType)
-    ruta_torch <- find.package("torch")
-  }
-
-  version <- read.dcf(file.path(ruta_torch, "DESCRIPTION"), fields = "Version")[1, 1]
-  destino <- file.path(cache, paste0("torch-", version))
-  descargas <- file.path(cache, "descargas_torch")
-  dir.create(destino, recursive = TRUE, showWarnings = FALSE)
-  dir.create(descargas, showWarnings = FALSE)
-  origenes <- Sys.getenv(c("TORCH_URL", "LANTERN_URL"))
-  callr::r(function(destino, descargas, origenes) {
-    Sys.setenv(TORCH_HOME = destino,
-               R_LIBS = paste(.libPaths(), collapse = .Platform$path.sep))
-    options(download.file.method = "libcurl", timeout = max(900, getOption("timeout")))
-    if (!torch::torch_is_installed()) {
-      # Usar los ZIP locales compatibles cuando esten disponibles.
-      Sys.unsetenv(names(origenes))
-      urls <- torch::get_install_libs_url()
-      nombres_zip <- basename(unlist(urls, use.names = FALSE))
-      for (i in seq_along(origenes)) {
-        if (!nzchar(origenes[i])) {
-          candidatos <- file.path(descargas, unique(c(URLdecode(nombres_zip[i]), nombres_zip[i])))
-          origenes[i] <- c(candidatos[file.exists(candidatos)], "")[1]
-        }
-        if (nzchar(origenes[i])) {
-          if (!grepl("^https?://", origenes[i])) {
-            if (!file.exists(origenes[i])) {
-              stop("No se encontro el ZIP indicado en ", names(origenes)[i],
-                   ": ", origenes[i], call. = FALSE)
-            }
-            origenes[i] <- normalizePath(origenes[i], winslash = "/", mustWork = TRUE)
-            message("Usando el ZIP local ", basename(origenes[i]), ".")
-          }
-        }
-      }
-      if (any(nzchar(origenes))) {
-        do.call(Sys.setenv, as.list(origenes[nzchar(origenes)]))
-      }
-
-      # La instalacion temporal evita falsos permisos de escritura en OneDrive.
-      instalacion <- tempfile("libtorch-")
-      dir.create(instalacion)
-      Sys.setenv(TORCH_HOME = instalacion)
-      message("Instalando LibTorch y LibLantern para CPU.")
-      tryCatch(
-        torch::install_torch(.inform_restart = FALSE),
-        error = function(e) {
-          stop(conditionMessage(e), "\nZIP compatibles para instalar desde archivos en ",
-               descargas, ":\n", paste(URLdecode(nombres_zip), collapse = "\n"),
-               call. = FALSE)
-        }
-      )
-      archivos <- list.files(instalacion, all.files = TRUE, full.names = TRUE,
-                             no.. = TRUE)
-      if (!all(file.copy(archivos, destino, recursive = TRUE, overwrite = TRUE))) {
-        stop("R no pudo copiar los binarios de Torch a ", destino, call. = FALSE)
-      }
-      Sys.setenv(TORCH_HOME = destino)
-      if (!torch::torch_is_installed(recheck = TRUE)) {
-        stop("No se pudieron cargar LibTorch y LibLantern.")
-      }
+    # Microsoft tambien distribuye la DLL x64 en su paquete de Maven Central.
+    url <- paste0("https://repo.maven.apache.org/maven2/com/microsoft/",
+                  "onnxruntime/onnxruntime/1.25.1/onnxruntime-1.25.1.jar")
+    archivo <- tempfile(fileext = ".zip")
+    on.exit(unlink(archivo), add = TRUE)
+    message("Probando el binario de ONNX que publica Microsoft en Maven Central.")
+    download.file(url, archivo, mode = "wb", method = "libcurl")
+    destino <- file.path(tools::R_user_dir("onnxr", "data"), "lib")
+    dir.create(destino, recursive = TRUE, showWarnings = FALSE)
+    unzip(archivo, files = paste0("ai/onnxruntime/native/win-x64/",
+                                 c("onnxruntime.dll", "onnxruntime_providers_shared.dll")),
+          exdir = destino, junkpaths = TRUE)
+    if (!onnxr::onnx_is_installed()) {
+      stop("No se pudo preparar ONNX Runtime en ", destino, call. = FALSE)
     }
-  }, args = list(destino = destino, descargas = descargas, origenes = origenes),
-  libpath = .libPaths(), show = TRUE)
-  Sys.setenv(TORCH_HOME = destino)
-  library(torch)
+  })
 }
 
-if (usar_nn) {
-  cache_nn <- normalizePath(dir_dependencias_nn, winslash = "/", mustWork = TRUE)
-  preparar_torch_nn(cache_nn)
+preparar_onnx <- function() {
+  Sys.setenv(R_USER_DATA_DIR = file.path(normalizePath(dir_dependencias, winslash = "/"), "runtime"))
+  if (!onnxr::onnx_is_installed()) instalar_onnx_nn()
+}
 
-  # sbert genera los embeddings de E5 con ONNX Runtime.
-  if (!length(find.package("sbert", quiet = TRUE))) {
-    install.packages("sbert", type = .Platform$pkgType)
+if (bloque == "xgboost_text_svd" && !reticulate::py_available(initialize = FALSE)) {
+  reticulate::py_require(c("numpy==2.2.6", "scikit-learn==1.9.1", "threadpoolctl==3.8.0"),
+                         python_version = ">=3.11,<3.13")
+  if (!nzchar(Sys.getenv("RETICULATE_PYTHON"))) {
+    interprete <- Sys.which(c("python", "python3"))
+    interprete <- unname(interprete[nzchar(interprete)])[1L]
+    prueba <- "import numpy, sklearn, threadpoolctl; assert (numpy.__version__, sklearn.__version__, threadpoolctl.__version__) == ('2.2.6', '1.9.1', '3.8.0')"
+    if (!is.na(interprete) && system2(interprete, c("-c", shQuote(prueba)), stdout = FALSE,
+                                      stderr = FALSE) == 0L) {
+      reticulate::use_python(interprete, required = TRUE)
+    } else {
+      Sys.setenv(RETICULATE_PYTHON = "managed")
+    }
   }
-  if (!requireNamespace("sbert", quietly = TRUE)) {
-    stop("00_setup.R no pudo cargar sbert. Revise la instalacion desde CRAN.",
-         call. = FALSE)
-  }
-  # onnxr usa R_user_dir("onnxr", "data") para instalar y encontrar el runtime.
-  Sys.setenv(R_USER_DATA_DIR = file.path(cache_nn, "runtime"))
-  if (!onnxr::onnx_is_installed()) sbert::install_runtime(cuda = FALSE)
 }
 
 # ------------------------------------------------------------------------------
 # (3) Resolver conflictos entre funciones
 # ------------------------------------------------------------------------------
 
-# Elegir dplyr al cargar las librerias de los modelos de arboles.
-if (!usar_nn) {
-  conflict_prefer("select", "dplyr")
-  conflict_prefer("filter", "dplyr")
-  conflict_prefer("lag", "dplyr")
+if ("package:conflicted" %in% search() && "package:dplyr" %in% search()) {
+  conflicted::conflict_prefer("filter", "dplyr")
+  conflicted::conflict_prefer("lag", "dplyr")
 }

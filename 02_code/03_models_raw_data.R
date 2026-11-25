@@ -27,15 +27,15 @@ configuraciones <- list(
   random_forest = list(
     num.trees = c(150L, 250L),          # Cantidad de arboles del bosque.
     mtry = c(4L, 6L),                   # Predictores candidatos por division.
-    min.node.size = c(5L, 10L, 15L),    # Tamano minimo del nodo para dividirlo.
-    max.depth = c(10L, 20L),            # Profundidad maxima de un arbol.
+    min.node.size = 5L,    # Tamano minimo del nodo para dividirlo.
+    max.depth = 20L,            # Profundidad maxima de un arbol.
     sample.fraction = 0.8               # Fraccion de train muestreada por arbol.
   ),
   xgboost = list(
     nrounds = c(200L, 400L),            # Cantidad de rondas de boosting.
-    eta = c(0.01, 0.02, 0.05),          # Tasa de aprendizaje.
-    max_depth = c(4L, 6L),              # Profundidad maxima de un arbol.
-    min_child_weight = c(10L, 20L, 30L), # Peso minimo para crear un nodo hijo.
+    eta = 0.05,          # Tasa de aprendizaje.
+    max_depth = 6L,              # Profundidad maxima de un arbol.
+    min_child_weight = c(10L, 20L), # Peso minimo para crear un nodo hijo.
     subsample = 0.85,                   # Fraccion de filas por ronda.
     colsample_bytree = 0.9,             # Fraccion de predictores por arbol.
     lambda = 1,                        # Regularizacion L2 de las hojas.
@@ -43,9 +43,9 @@ configuraciones <- list(
   ),
   lightgbm = list(
     nrounds = c(200L, 400L),            # Cantidad de rondas de boosting.
-    learning_rate = c(0.01, 0.02, 0.05), # Tasa de aprendizaje.
-    max_depth = c(4L, 6L),              # Profundidad maxima de un arbol.
-    min_data_in_leaf = c(10L, 20L, 30L), # Minimo de observaciones en cada hoja.
+    learning_rate = 0.05, # Tasa de aprendizaje.
+    max_depth = 6L,              # Profundidad maxima de un arbol.
+    min_data_in_leaf = c(10L, 20L), # Minimo de observaciones en cada hoja.
     num_leaves = 64L,                  # Tope de hojas para permitir profundidad 6.
     bagging_fraction = 0.85,            # Fraccion de filas por muestreo.
     bagging_freq = 1L,                  # Muestrear filas en cada ronda.
@@ -55,6 +55,12 @@ configuraciones <- list(
 )
 
 grillas <- lapply(configuraciones, expand.grid, KEEP.OUT.ATTRS = FALSE)
+parametros_nombre <- list(
+  random_forest = c("num.trees", "mtry", "min.node.size", "max.depth"),
+  xgboost = c("nrounds", "eta", "max_depth", "min_child_weight"),
+  lightgbm = c("nrounds", "learning_rate", "max_depth", "min_data_in_leaf")
+)
+
 carpetas <- c(
   random_forest = "01_random_forest",
   xgboost = "02_xgboost",
@@ -66,8 +72,10 @@ carpetas <- c(
 # ------------------------------------------------------------------------------
 
 train <- read_csv(archivo_train, show_col_types = FALSE)
-test <- read_csv(archivo_test, show_col_types = FALSE)
-plantilla <- read_csv(archivo_plantilla, show_col_types = FALSE)
+tipo_id <- cols(property_id = col_character())
+test <- read_csv(archivo_test, col_types = tipo_id, show_col_types = FALSE)
+plantilla <- read_csv(archivo_plantilla, col_types = tipo_id, col_select = property_id,
+                       show_col_types = FALSE)
 
 # Se conservan los NA, ceros y valores extremos tal como llegan en los CSV.
 # Usar solo variables estructuradas. El ID se reserva para la entrega.
@@ -84,7 +92,9 @@ x_test$apartamento <- as.integer(test$property_type == "Apartamento")
 # Ajustar en millones de COP y evaluar/exportar en COP.
 y <- train$price / 1e6
 orden_test <- match(plantilla$property_id, test$property_id)
-stopifnot(!anyNA(y), !anyNA(orden_test))
+stopifnot(!anyNA(y), !anyNA(test$property_id), !anyNA(plantilla$property_id),
+          !anyDuplicated(test$property_id), !anyDuplicated(plantilla$property_id),
+          setequal(test$property_id, plantilla$property_id), !anyNA(orden_test))
 
 set.seed(semilla)
 fold <- sample(rep(seq_len(n_folds), length.out = nrow(train)))
@@ -201,8 +211,8 @@ for (familia in names(grillas)) {
   mejor <- ranking[1, , drop = FALSE]
   parametros <- as.list(mejor[names(grilla)])
 
-  # El nombre utiliza los valores ganadores de los parametros que se iteraron.
-  iterados <- names(configuraciones[[familia]])[lengths(configuraciones[[familia]]) > 1L]
+  # El nombre utiliza los valores de los hiperparametros principales del ganador.
+  iterados <- parametros_nombre[[familia]]
   valores <- vapply(parametros[iterados], format, character(1),
                     trim = TRUE, scientific = FALSE, decimal.mark = ".")
   pares <- paste(iterados, valores, sep = "_", recycle0 = TRUE)
@@ -214,7 +224,7 @@ for (familia in names(grillas)) {
 
   modelo <- ajustar(familia, x_train, y, parametros)
   pred_test <- predecir(familia, modelo, x_test)
-  stopifnot(all(is.finite(pred_test)))
+  stopifnot(length(pred_test) == nrow(test), all(is.finite(pred_test)))
 
   switch(
     familia,
@@ -222,8 +232,8 @@ for (familia in names(grillas)) {
     xgboost = xgb.save(modelo, file.path(salida, paste0(nombre, ".ubj"))),
     lightgbm = lgb.save(modelo, file.path(salida, paste0(nombre, ".txt")))
   )
-  plantilla$price <- pred_test[orden_test] * 1e6
-  write_csv(plantilla, file.path(salida, paste0(nombre, ".csv")))
+  predicciones <- data.frame(property_id = plantilla$property_id, price = pred_test[orden_test] * 1e6)
+  write_csv(predicciones, file.path(salida, paste0(nombre, ".csv")))
 
   ganadores[[familia]] <- cbind(
     modelo = familia, bloque = "raw_data", k_folds = n_folds, semilla = semilla,
@@ -243,17 +253,7 @@ resumen <- resumen[order(resumen$perdida_asim_cop, resumen$mae_cop), ]
 hojas[["resumen"]] <- resumen
 
 # Mantener las cifras como numeros, con COP enteros para la visualizacion.
-libro <- buildWorkbook(hojas, asTable = TRUE, firstRow = TRUE, colWidths = "auto")
-formato_cop <- createStyle(numFmt = "#,##0")
-formato_decimal <- createStyle(numFmt = "0.0")
-for (hoja in names(hojas)) {
-  filas <- seq_len(nrow(hojas[[hoja]])) + 1L
-  columnas_cop <- grep("_cop$", names(hojas[[hoja]]))
-  columnas_decimales <- which(names(hojas[[hoja]]) %in% c("pct_sobre", "segundos_cv"))
-  addStyle(libro, hoja, formato_cop, rows = filas, cols = columnas_cop, gridExpand = TRUE)
-  addStyle(libro, hoja, formato_decimal, rows = filas, cols = columnas_decimales, gridExpand = TRUE)
-}
-saveWorkbook(libro, file.path(dir_modelos_raw, "resumen.xlsx"), overwrite = TRUE)
+write.xlsx(hojas, file.path(dir_modelos_raw, "resumen.xlsx"), overwrite = TRUE)
 
 print(resumen[c("modelo", "perdida_asim_cop", "mae_cop", "hiperparametros")],
       row.names = FALSE)
